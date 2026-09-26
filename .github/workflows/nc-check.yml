@@ -1,0 +1,46 @@
+name: NewConnect check
+
+on: workflow_dispatch
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Test NewConnect
+        run: |
+          python - <<'EOF'
+          import re
+          import requests
+
+          H = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+               "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8"}
+
+          def inspect(label, url):
+              print(f"\n=== {label} ===")
+              try:
+                  r = requests.get(url, headers=H, timeout=30)
+              except Exception as e:
+                  print("FAILED:", type(e).__name__, str(e)[:150]); return ""
+              html = r.text
+              print("status", r.status_code, "| size", len(html))
+              print("report links:", html.count("geru_id="), "| company links:", html.count("spolka?isin="))
+              ajax = sorted(set(re.findall(r"ajaxindex\.php[^'\"\s<>)]*", html)))
+              print("ajax addresses:", ajax[:15])
+              for m in sorted(set(re.findall(r"action['\"]?\s*[:=]\s*['\"]([A-Za-z_]+)['\"]", html)))[:20]:
+                  print("   action:", m)
+              for m in re.finditer(r"(\$\.(?:ajax|post|get)|fetch\()[\s\S]{0,300}", html):
+                  print("   js:", " ".join(m.group(0).split())[:300])
+              return html
+
+          reports = inspect("Reports list", "https://newconnect.pl/spolki-komunikaty-spolek")
+          inspect("Company list", "https://newconnect.pl/spolki")
+          ids = re.findall(r"geru_id=(\d+)", reports)
+          if ids:
+              page = inspect("One report", f"https://newconnect.pl/komunikat?geru_id={ids[0]}")
+              text = re.sub(r"<[^>]+>", " ", page)
+              print("report text sample:", " ".join(text.split())[2000:2600])
+          EOF

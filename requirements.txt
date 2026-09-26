@@ -7,3 +7,4 @@ beautifulsoup4>=4.12
 feedparser>=6.0
 deep-translator>=1.11
 tzdata
+psycopg[binary]>=3.1

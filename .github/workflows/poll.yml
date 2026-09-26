@@ -1,0 +1,32 @@
+name: Poll filings
+
+on:
+  schedule:
+    - cron: "*/10 23,0-10 * * 0-5"
+    - cron: "17 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: poll-filings
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python worker.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APP_URL: ${{ secrets.APP_URL }}

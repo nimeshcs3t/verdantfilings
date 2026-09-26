@@ -10,7 +10,8 @@ from core.config import get_secret
 PROMPT = """You write short English briefs of stock-exchange filings for investors.
 Use only facts stated in the document. Write 3 to 5 bullet points, each starting with "- ".
 Start with what happened, then the key figures (amounts with currency, share counts, percentages, dates)
-and the parties involved. Convert Korean units correctly (억원 = 100 million KRW, 조원 = 1 trillion KRW).
+and the parties involved. Convert local units correctly (억원 = 100 million KRW, 조원 = 1 trillion KRW,
+百万円 = 1 million JPY, 億円 = 100 million JPY).
 No preamble, no investment advice, no speculation.
 
 Company: {company}

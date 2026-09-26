@@ -62,8 +62,16 @@ def format_filing(row: dict) -> str:
         lines.append(f"<i>{esc(row['title_local'])}</i>")
     if row.get("summary_en"):
         lines += ["", esc(row["summary_en"])[:1500]]
-    lines += ["", f'<a href="{html.escape(row["url"])}">Original filing</a>']
+    links = f'<a href="{html.escape(row["url"])}">Original filing</a>'
     app_url = get_secret("APP_URL")
     if app_url:
-        lines[-1] += f'   <a href="{html.escape(app_url)}">Open app</a>'
+        links += f'   <a href="{html.escape(app_url)}">Open app</a>'
+    lines += ["", links]
+    try:
+        from sources import get_source
+        credit = getattr(get_source(row["market"]), "attribution", "")
+    except Exception:
+        credit = ""
+    if credit:
+        lines.append(f"<i>{esc(credit)}</i>")
     return "\n".join(lines)

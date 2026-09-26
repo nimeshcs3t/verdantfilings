@@ -30,6 +30,7 @@ class Filing:
     title_local: str
     filer: str
     url: str
+    title_en: str = ""      # set when the source already provides a good English title
 
 
 class FilingSource(ABC):
@@ -40,6 +41,7 @@ class FilingSource(ABC):
     timezone = "UTC"
     ticker_hint = ""
     news_local: dict | None = None   # Google News params for local-language press
+    attribution = ""        # credit line required by the data licence, shown with the data
     backfill_days = 90      # history to load when a company is first added
     incremental_days = 7    # window re-checked on each later sync
 

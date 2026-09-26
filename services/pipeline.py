@@ -139,7 +139,7 @@ def sync_company(market: str, ticker: str, force: bool = False) -> int:
             continue
         row = dict(uid=f.uid, market=f.market, ticker=f.ticker, company_name=comp["name_en"] or f.company_name,
                    filed_date=f.filed_date, title_local=f.title_local,
-                   title_en=translate_title(f.title_local, src.source_lang), filer=f.filer, url=f.url,
+                   title_en=f.title_en or translate_title(f.title_local, src.source_lang), filer=f.filer, url=f.url,
                    notified=False, created_at=utcnow())
         try:
             with get_engine().begin() as conn:

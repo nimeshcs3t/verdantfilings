@@ -68,7 +68,8 @@ def page() -> None:
     elif not comp.get("last_synced"):
         github.trigger_sync()
 
-    meta = "".join(f"<span>{esc(x)}</span>" for x in (comp["name_local"], comp["ticker"], f"{src.country}, {src.regulator}"))
+    local = comp["name_local"] if comp["name_local"] != comp["name_en"] else ""
+    meta = "".join(f"<span>{esc(x)}</span>" for x in (local, comp["ticker"], f"{src.country}, {src.regulator}") if x)
     html_block(f'<h1 class="co-name">{esc(comp["name_en"])}</h1><div class="co-meta ko">{meta}</div>')
 
     watching = watch.is_watching(user["id"], market, comp["ticker"])
@@ -103,6 +104,8 @@ def page() -> None:
             st.caption(f"{len(rows)} filings in the last 90 days")
         for r in rows:
             render_filing(r, key="co", show_company=False)
+        if src.attribution and rows:
+            st.caption(src.attribution)
 
     with tab_news:
         press = st.segmented_control("Press", ["English press", "Korean press, translated"],
@@ -127,7 +130,8 @@ def _search_results(query: str) -> None:
     if not results:
         st.caption("No matches.")
     for c in results[:8]:
-        st.button(f"{c.name_en}  ({c.ticker})  {c.name_local}", key=f"sr-{c.market}-{c.ticker}", type="tertiary",
+        label = f"{c.name_en}  ({c.ticker})" + (f"  {c.name_local}" if c.name_local != c.name_en else "")
+        st.button(label, key=f"sr-{c.market}-{c.ticker}", type="tertiary",
                   on_click=_pick, args=(c.market, c.ticker))
 
 

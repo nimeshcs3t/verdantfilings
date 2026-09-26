@@ -64,6 +64,24 @@ Each user has a `plan` (`free` or `pro`). Plans already limit watchlist size (`F
 small webhook that sets `plan = 'pro'`. Other natural pro features: Telegram alerts, full-document translation,
 more companies, CSV export.
 
+## USA (SEC EDGAR)
+
+Free, no key. Add `SEC_CONTACT_EMAIL` (a real address; the SEC requires it in every request) to GitHub
+Actions secrets and to Streamlit secrets, then run Poll filings once to load about 10,000 tickers.
+Covers NYSE, Nasdaq, SEC-reporting OTC companies, and foreign issuers listed in the US (6-K, 20-F, 40-F).
+8-K titles show what the report is about (earnings, officer change, material agreement...).
+
+## Japan (EDINET)
+
+Free key: https://disclosure2.edinet-fsa.go.jp, create an account, then issue an API key (API キー発行).
+Add `EDINET_API_KEY` to GitHub Actions secrets and to Streamlit secrets, then run Poll filings once to load
+the company list. Tickers are 4-character TSE codes (7203 Toyota, 6758 Sony).
+
+EDINET covers statutory filings (annual and semi-annual reports, extraordinary reports, large shareholding
+reports, tender offers, buyback reports). Exchange announcements on TDnet (earnings flashes, guidance) have
+no free API and aren't included. EDINET data is under the Public Data License 1.0: commercial use is
+allowed with the credit line the app shows next to Japanese filings.
+
 ## Israel (TASE MAYA)
 
 1. Create an account at https://datahub.tase.co.il, subscribe to "Market Announcements feed (MAYA)"

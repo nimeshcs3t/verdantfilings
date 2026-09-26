@@ -10,7 +10,7 @@ from core.db import as_utc, utcnow
 from core.ui import esc, filing_row_html, html_block, news_html, summary_html
 from core.config import direct_fetch
 from services import github, news, watch
-from services.pipeline import enrich_filing, is_queued, search_companies
+from services.pipeline import enrich_filing, get_company, is_queued, search_companies
 from sources import configured_sources, get_source
 
 
@@ -67,8 +67,12 @@ def add_company_form(user: dict, key: str = "add") -> None:
     if submitted and query.strip():
         src = get_source(market)
         ticker = src.normalize_ticker(query)
-        if ticker:
-            _add(user, market, ticker)
+        try:
+            known = get_company(market, ticker) if ticker else None
+        except Exception:
+            known = None
+        if known:
+            _add(user, market, known["ticker"])
         else:
             with st.spinner("Searching"):
                 try:
@@ -82,7 +86,8 @@ def add_company_form(user: dict, key: str = "add") -> None:
     if matches:
         st.caption("Choose a company")
         for m, t, name_en, name_local in matches:
-            if st.button(f"{name_en}  ({t})  {name_local}", key=f"pick-{key}-{m}-{t}", type="tertiary"):
+            label = f"{name_en}  ({t})" + (f"  {name_local}" if name_local and name_local != name_en else "")
+            if st.button(label, key=f"pick-{key}-{m}-{t}", type="tertiary"):
                 st.session_state.pop(f"matches-{key}", None)
                 _add(user, m, t)
 

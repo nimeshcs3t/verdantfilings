@@ -83,6 +83,8 @@ def page() -> None:
         label_country = len(markets) > 1 and choice == "All"
         for r in rows:
             render_filing(r, key="today", country=get_source(r["market"]).country if label_country else "")
+        for credit in sorted({get_source(r["market"]).attribution for r in rows} - {""}):
+            st.caption(credit)
 
     with side:
         html_block('<div class="section" style="margin-top:.2rem">Headlines</div>')

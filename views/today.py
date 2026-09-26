@@ -65,17 +65,11 @@ def page() -> None:
 
     main, side = st.columns([2.2, 1], gap="large")
     with main:
-        cols = st.columns([1.1, 1.1, 1]) if len(markets) > 1 else st.columns([1.1, 1, 0.1])
-        with cols[0]:
-            st.segmented_control("Period", list(PERIODS), default="Today", key="today-period",
-                                 label_visibility="collapsed")
-        with cols[1]:
-            st.segmented_control("View", ["By time", "By company"], default="By time", key="today-view",
-                                 label_visibility="collapsed")
+        cols = st.columns(3 if len(markets) > 1 else [1, 1, 1])
+        cols[0].selectbox("Period", list(PERIODS), key="today-period")
+        cols[1].selectbox("View", ["By time", "By company"], key="today-view")
         if len(markets) > 1:
-            with cols[2]:
-                st.segmented_control("Country", ["All"] + [get_source(m).country for m in markets],
-                                     default="All", key="today-market", label_visibility="collapsed")
+            cols[2].selectbox("Country", ["All"] + [get_source(m).country for m in markets], key="today-market")
 
         present = [k for k in ORDER if any(r["category"] == k for r in rows)]
         if rows:

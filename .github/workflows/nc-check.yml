@@ -6,51 +6,18 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install requests beautifulsoup4
-      - name: Test company page tabs
+      - run: pip install -r requirements.txt
+      - name: Check translation
         run: |
           python - <<'EOF'
-          import re
-          import requests
-          from bs4 import BeautifulSoup
-
-          s = requests.Session()
-          s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-                            "Accept-Language": "pl-PL,pl;q=0.9"})
-          url = "https://newconnect.pl/spolka?isin=PLLFTER00018"
-          html = s.get(url, timeout=30).text
-          soup = BeautifulSoup(html, "html.parser")
-          print("status ok | size", len(html), "| report links already in page:", html.count("geru_id="))
-          for gid in sorted(set(re.findall(r"geru_id=(\d+)", html)))[:10]:
-              print("   geru_id", gid)
-
-          print("\n=== Tabs ===")
-          for a in soup.find_all("a"):
-              label = a.get_text(" ", strip=True)
-              if label in ("ESPI", "EBI", "Archiwum", "Archive", "Informacje podstawowe"):
-                  print(label, "->", {k: v for k, v in a.attrs.items() if k != "class"})
-
-          print("\n=== Forms ===")
-          for f in soup.find_all("form"):
-              fields = [(i.get("name"), i.get("value")) for i in f.find_all(["input", "select"]) if i.get("name")]
-              if fields and not any(n == "search_lang" for n, _ in fields):
-                  print("form id=", f.get("id"), "target=", f.get("data-target"))
-                  for n, v in fields[:25]:
-                      print("   ", n, "=", v)
-
-          print("\n=== Elements with data attributes ===")
-          for tag in soup.find_all(True):
-              data = {k: v for k, v in tag.attrs.items() if k.startswith("data-") and k not in ("data-toggle", "data-target", "data-dismiss")}
-              if data and any(x in str(data).lower() for x in ("espi", "ebi", "action", "ajax", "isin", "raport")):
-                  print(tag.name, tag.get("id"), data)
-
-          print("\n=== Script calls ===")
-          for m in re.finditer(r"(\$\.(?:ajax|post|get|load)|\.load\(|fetch\()[\s\S]{0,350}", html):
-              print(" ".join(m.group(0).split())[:350])
-              print("---")
-          for m in sorted(set(re.findall(r"action[=:]\s*['\"]?([A-Za-z_]{5,})", html))):
-              print("action name:", m)
+          from deep_translator import GoogleTranslator
+          for src, text in [("pl", "Sporządzenie Aneksu nr 1 do Planu podziału"), ("ko", "자기주식취득결정"), ("auto", "Zwołanie Walnego Zgromadzenia")]:
+              try:
+                  print(src, "->", GoogleTranslator(source=src, target="en").translate(text))
+              except Exception as e:
+                  print(src, "FAILED:", type(e).__name__, str(e)[:200])
           EOF

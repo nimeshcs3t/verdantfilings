@@ -295,26 +295,60 @@ def retranslate_titles(limit: int = 200) -> int:
     return fixed
 
 
+class _WarningCollector(logging.Handler):
+    def __init__(self):
+        super().__init__(level=logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage()[:300])
+
+
 def run_once() -> dict:
-    """One full worker cycle. Used by worker.py."""
+    """One full worker cycle. Used by worker.py and the admin page."""
+    started = time.time()
+    collector = _WarningCollector()
+    logging.getLogger().addHandler(collector)
     stats = {"listed": 0, "companies": 0, "new": 0, "summaries": 0, "errors": 0, "alerts": 0}
     try:
-        stats["listed"] = refresh_listings()
-    except Exception as exc:
-        stats["errors"] += 1
-        log.warning("listing refresh failed: %s", exc)
-    for market, ticker in tracked_pairs():
         try:
-            stats["new"] += sync_company(market, ticker, force=True)
-            stats["companies"] += 1
+            stats["listed"] = refresh_listings()
         except Exception as exc:
             stats["errors"] += 1
-            log.warning("sync failed for %s:%s: %s", market, ticker, exc)
+            log.warning("listing refresh failed: %s", exc)
+        for market, ticker in tracked_pairs():
+            try:
+                stats["new"] += sync_company(market, ticker, force=True)
+                stats["companies"] += 1
+            except Exception as exc:
+                stats["errors"] += 1
+                log.warning("sync failed for %s:%s: %s", market, ticker, exc)
+        from . import bot, briefs, events, financials, housekeeping, insiders, portfolio
+        from .alerts import run_alerts
+        steps = [("retranslated", retranslate_titles), ("summaries", process_overviews), (None, run_alerts),
+                 ("commands", bot.process_updates), ("financials", financials.refresh),
+                 ("insiders", insiders.refresh), ("events", events.refresh), ("briefs", briefs.refresh),
+                 ("price_alerts", portfolio.check_alerts)]
+        for key, step in steps:
+            try:
+                result = step()
+                if key:
+                    stats[key] = result
+                else:
+                    stats.update(result)
+            except Exception as exc:
+                log.warning("%s failed: %s", key or "alerts", exc)
+        try:
+            cleaned = housekeeping.cleanup()
+            stats["cleaned"] = sum(cleaned.values()) if cleaned else 0
+        except Exception as exc:
+            log.warning("clean-up failed: %s", exc)
+    finally:
+        logging.getLogger().removeHandler(collector)
     try:
-        stats["retranslated"] = retranslate_titles()
-    except Exception as exc:
-        log.warning("retranslation failed: %s", exc)
-    stats["summaries"] = process_overviews()
-    from .alerts import run_alerts
-    stats.update(run_alerts())
+        from .housekeeping import log_run
+        log_run(time.time() - started, stats, collector.messages)
+    except Exception:
+        pass
+    stats["warnings"] = len(collector.messages)
     return stats

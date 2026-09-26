@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timezone
 
-from sqlalchemy import (Boolean, Column, Date, DateTime, Index, Integer, MetaData, String, Table, Text,
+from sqlalchemy import (Boolean, Column, Date, DateTime, Float, Index, Integer, MetaData, String, Table, Text,
                         create_engine)
 from sqlalchemy.engine import Engine
 
@@ -190,6 +190,97 @@ sessions = Table(
     Column("token_hash", String(64), primary_key=True),
     Column("user_id", Integer, nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
+)
+
+financials = Table(
+    "financials", metadata,                 # key figures per period, from DART and SEC
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("kind", String(8), primary_key=True),        # annual | quarter
+    Column("period", String(12), primary_key=True),     # 2025 | 2025 Q3
+    Column("revenue", Float),
+    Column("op_income", Float),
+    Column("net_income", Float),
+    Column("currency", String(8)),
+)
+
+company_meta = Table(
+    "company_meta", metadata,               # refresh times and the AI brief per company
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("fin_updated", DateTime(timezone=True)),
+    Column("insider_updated", DateTime(timezone=True)),
+    Column("brief", Text),
+    Column("brief_updated", DateTime(timezone=True)),
+)
+
+insider_tx = Table(
+    "insider_tx", metadata,
+    Column("uid", String(80), primary_key=True),        # filing uid
+    Column("seq", Integer, primary_key=True),
+    Column("market", String(8), nullable=False),
+    Column("ticker", String(16), nullable=False),
+    Column("person", String(200)),
+    Column("role", String(200)),
+    Column("tx_date", Date),
+    Column("code", String(4)),                          # P buy, S sell, A grant, F tax, M exercise, ...
+    Column("shares", Float),
+    Column("price", Float),
+    Column("after", Float),
+    Index("ix_insider_company", "market", "ticker", "tx_date"),
+)
+
+events = Table(
+    "events", metadata,                     # dates announced in filings (meetings, record dates, results...)
+    Column("uid", String(64), primary_key=True),
+    Column("event_date", Date, primary_key=True),
+    Column("label", String(120), primary_key=True),
+    Column("market", String(8), nullable=False),
+    Column("ticker", String(16), nullable=False),
+    Index("ix_events_company", "market", "ticker", "event_date"),
+)
+
+events_scanned = Table(
+    "events_scanned", metadata,
+    Column("uid", String(64), primary_key=True),
+)
+
+holdings = Table(
+    "holdings", metadata,
+    Column("user_id", Integer, primary_key=True),
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("shares", Float, nullable=False),
+    Column("avg_price", Float, nullable=False),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+)
+
+price_alerts = Table(
+    "price_alerts", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, nullable=False),
+    Column("market", String(8), nullable=False),        # "*" with ticker "*" = whole watchlist
+    Column("ticker", String(16), nullable=False),
+    Column("kind", String(8), nullable=False),          # move | above | below
+    Column("value", Float, nullable=False),
+    Column("active", Boolean, nullable=False, default=True),
+    Column("last_fired", String(10)),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+)
+
+bot_state = Table(
+    "bot_state", metadata,                  # small key-value store (Telegram offset, last clean-up...)
+    Column("key", String(40), primary_key=True),
+    Column("value", Text),
+)
+
+run_log = Table(
+    "run_log", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("started_at", DateTime(timezone=True), default=utcnow),
+    Column("seconds", Float),
+    Column("stats", Text),
+    Column("warnings", Text),
 )
 
 _engine: Engine | None = None

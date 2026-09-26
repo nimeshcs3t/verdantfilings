@@ -25,6 +25,14 @@ KEYWORDS = ("decision", "contract", "dividend", "acqui", "dispos", "share", "won
             "counterparty", "buyback", "treasury")
 
 
+def _count(key: str) -> None:
+    try:
+        from core.usage import count
+        count(key)
+    except Exception:
+        pass
+
+
 def _gemini(prompt: str) -> str | None:
     key = get_secret("GEMINI_API_KEY")
     if not key:
@@ -35,7 +43,10 @@ def _gemini(prompt: str) -> str | None:
         headers={"x-goog-api-key": key, "Content-Type": "application/json"},
         json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2}},
         timeout=60)
+    if r.status_code == 429:
+        _count("gem-limit")
     r.raise_for_status()
+    _count("gemini")
     return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 

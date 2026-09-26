@@ -87,8 +87,8 @@ def _num(value: str) -> str:
         return value or ""
 
 
-def _insider_text(xml: str) -> str:
-    """Plain-English lines from a Form 3/4/5 ownership document."""
+def parse_ownership(xml: str) -> list[dict]:
+    """Structured rows from a Form 3/4/5 ownership document."""
     soup = BeautifulSoup(xml, "html.parser")
     val = lambda node, tag: (node.find(tag).find("value").get_text(strip=True)
                              if node and node.find(tag) and node.find(tag).find("value") else "")
@@ -99,31 +99,44 @@ def _insider_text(xml: str) -> str:
     if rel:
         if rel.find("officertitle"):
             roles.append(rel.find("officertitle").get_text(strip=True))
-        if (rel.find("isdirector") and rel.find("isdirector").get_text(strip=True) in ("1", "true")):
+        if rel.find("isdirector") and rel.find("isdirector").get_text(strip=True) in ("1", "true"):
             roles.append("Director")
-        if (rel.find("istenpercentowner") and rel.find("istenpercentowner").get_text(strip=True) in ("1", "true")):
+        if rel.find("istenpercentowner") and rel.find("istenpercentowner").get_text(strip=True) in ("1", "true"):
             roles.append("10% owner")
-    who = f"{name} ({', '.join(roles)})" if roles else name
-    lines = []
+    num = lambda s: float(s) if re.fullmatch(r"-?\d+(\.\d+)?", s or "") else None
+    rows = []
     for tx in soup.find_all("nonderivativetransaction"):
         code_tag = tx.find("transactioncode")
-        code = code_tag.get_text(strip=True) if code_tag else ""
-        shares, price = val(tx, "transactionshares"), val(tx, "transactionpricepershare")
-        security, day = val(tx, "securitytitle"), val(tx, "transactiondate")
-        after = val(tx, "sharesownedfollowingtransaction")
-        line = f"{who} " + TX_CODES.get(code, "reported a change of {n} shares").format(n=_num(shares))
-        if security and security.lower() not in ("common stock", "common shares", "ordinary shares"):
-            line += f" of {security}"
-        if price and float(price or 0) > 0:
-            line += f" at ${_num(price)} per share"
-        if day:
-            line += f" on {day}"
-        if after:
-            line += f". Holds {_num(after)} shares after the transaction"
+        day = val(tx, "transactiondate")
+        rows.append({"person": name, "role": ", ".join(roles), "code": code_tag.get_text(strip=True) if code_tag else "",
+                     "shares": num(val(tx, "transactionshares")), "price": num(val(tx, "transactionpricepershare")),
+                     "after": num(val(tx, "sharesownedfollowingtransaction")), "security": val(tx, "securitytitle"),
+                     "date": day[:10] if day else ""})
+    if not rows and soup.find("nonderivativeholding"):
+        rows.append({"person": name, "role": ", ".join(roles), "code": "H", "shares": None, "price": None,
+                     "after": num(val(soup.find("nonderivativeholding"), "sharesownedfollowingtransaction")),
+                     "security": "", "date": ""})
+    return rows
+
+
+def _insider_text(xml: str) -> str:
+    """Plain-English lines from a Form 3/4/5 ownership document."""
+    lines = []
+    for r in parse_ownership(xml):
+        who = f"{r['person']} ({r['role']})" if r["role"] else r["person"]
+        if r["code"] == "H":
+            lines.append(f"{who} reported holding {_num(r['after'])} shares.")
+            continue
+        line = f"{who} " + TX_CODES.get(r["code"], "reported a change of {n} shares").format(n=_num(r["shares"]))
+        if r["security"] and r["security"].lower() not in ("common stock", "common shares", "ordinary shares"):
+            line += f" of {r['security']}"
+        if r["price"]:
+            line += f" at ${_num(r['price'])} per share"
+        if r["date"]:
+            line += f" on {r['date']}"
+        if r["after"] is not None:
+            line += f". Holds {_num(r['after'])} shares after the transaction"
         lines.append(line + ".")
-    if not lines and soup.find("nonderivativeholding"):
-        held = val(soup.find("nonderivativeholding"), "sharesownedfollowingtransaction")
-        lines.append(f"{who} reported holding {_num(held)} shares.")
     return "\n".join(lines)
 
 
@@ -271,8 +284,8 @@ class EdgarSource(FilingSource):
                             "date": date.fromisoformat(filed.group(1)) if filed else self.today()})
         return out
 
-    def fetch_document_text(self, uid: str) -> str:
-        """Main document plus press-release exhibits (EX-99), from the filing's full submission file."""
+    def fetch_submission(self, uid: str) -> str:
+        """The filing's full submission text (first few MB)."""
         _, cik, acc = uid.split(":", 2)
         r = self._get(f"{ARCHIVE.format(cik, acc.replace('-', ''))}/{acc}.txt", stream=True)
         raw, size = [], 0
@@ -282,7 +295,11 @@ class EdgarSource(FilingSource):
             if size >= MAX_DOC_BYTES:
                 break
         r.close()
-        text = b"".join(raw).decode("utf-8", errors="ignore")
+        return b"".join(raw).decode("utf-8", errors="ignore")
+
+    def fetch_document_text(self, uid: str) -> str:
+        """Main document plus press-release exhibits (EX-99), from the filing's full submission file."""
+        text = self.fetch_submission(uid)
         parts = []
         for block in re.findall(r"<DOCUMENT>(.*?)(?:</DOCUMENT>|$)", text, re.S):
             doc_type = (re.search(r"<TYPE>([^\s<]+)", block) or [None, ""])[1].upper()

@@ -110,15 +110,27 @@ def _cache_put(key: str, text_en: str) -> None:
         pass
 
 
+def _count(key: str) -> None:
+    try:
+        from core.usage import count
+        count(key)
+    except Exception:
+        pass
+
+
 def _google(text: str, src: str) -> str | None:
     global _google_paused_until
     if time.time() < _google_paused_until:
         return None
     try:
-        return GoogleTranslator(source=src or "auto", target="en").translate(text) or None
+        out = GoogleTranslator(source=src or "auto", target="en").translate(text) or None
+        if out:
+            _count("google")
+        return out
     except Exception as exc:
         if "TooManyRequests" in type(exc).__name__ or "too many requests" in str(exc).lower():
             _google_paused_until = time.time() + 1800
+            _count("g-refuse")
         return None
 
 
@@ -151,6 +163,7 @@ def _mymemory(text: str, src: str) -> str | None:
         data = requests.get("https://api.mymemory.translated.net/get", params=params, timeout=20).json()
         english = (data.get("responseData") or {}).get("translatedText")
         if data.get("responseStatus") in (200, "200") and english and "MYMEMORY WARNING" not in english:
+            _count("mymemory")
             return english
     except Exception:
         pass

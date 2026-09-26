@@ -77,6 +77,14 @@ more companies, CSV export.
 - **Alerts:** instant or a daily digest at your time; skip insider trades; a weekly report on Mondays; keyword alerts
   matched market-wide for Korea, USA, Poland and Japan (keywords translated into each market's language).
 - **Remember me** for 30 days (a random token in a browser cookie; only its hash is stored).
+- **Company insight:** an AI brief of recent filings (weekly, needs Gemini), upcoming dates announced in filings
+  (meetings, record and payment dates, results), financial figures (Korea: DART key accounts, yearly; USA: SEC
+  company facts, yearly and quarterly), and insider trades (USA: Form 4; Korea: DART executive reports).
+- **Portfolio:** holdings with value, gain or loss, day move and recent filings; totals per currency.
+- **Price alerts** by Telegram: daily move above a %, or price above/below a level (whole watchlist or one company).
+- **Telegram commands:** /list /today /add /remove /portfolio /price /help (answered at the next job run).
+- **Housekeeping:** daily clean-up (filings older than 2 years except starred, long texts after 180 days, expired
+  sign-ins, old logs) and an Admin health panel with runs, warnings, usage and table sizes.
 - **Dark mode** following the device setting, or chosen in the ⋮ menu, then Settings.
 
 Share prices come from free sources (Yahoo Finance chart data, then Stooq) and may be delayed or unavailable for

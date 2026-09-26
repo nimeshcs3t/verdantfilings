@@ -4,7 +4,7 @@ import streamlit as st
 
 from core.ui import esc, html_block, logo_html, page_header, relative_time
 from core.config import direct_fetch
-from services import chat, github, personal, prices, watch
+from services import briefs, chat, events as events_svc, financials, github, insiders, personal, prices, watch
 from services.classify import ORDER, categorize, label as cat_label
 from services.pipeline import filings_for, get_company, search_companies, sync_company
 from sources import Company, configured_sources, get_source
@@ -96,6 +96,14 @@ def page() -> None:
     rows = filings_for([(market, comp["ticker"])], src.today() - timedelta(days=180), limit=300)
     for r in rows:
         r["category"] = categorize(r["title_en"], r["title_local"], r.get("price_sensitive"))
+    brief, brief_when = briefs.get(market, comp["ticker"])
+    if brief:
+        html_block(f'<div class="brief-box">{esc(brief)}<div class="meta">AI summary of recent filings, '
+                   f'updated {esc(relative_time(brief_when))}. Check the filings before relying on it.</div></div>')
+    coming = events_svc.upcoming([(market, comp["ticker"])], days=120)
+    if coming:
+        html_block('<div class="events">' + "".join(f'<span class="event"><b>{e["event_date"]:%d %b}</b>{esc(e["label"])}</span>'
+                                                    for e in coming[:6]) + "</div>")
     chart = prices.chart_svg(hist, [r["filed_date"] for r in rows])
     if chart:
         html_block(chart)
@@ -109,7 +117,13 @@ def page() -> None:
                 personal.save_note(user["id"], market, comp["ticker"], body)
                 st.toast("Notes saved")
 
-    tab_filings, tab_news, tab_chat = st.tabs(["Filings", "News", "Discussion"])
+    tab_filings, tab_fin, tab_ins, tab_news, tab_chat = st.tabs(["Filings", "Financials", "Insiders", "News", "Discussion"])
+
+    with tab_fin:
+        financials_tab(market, comp["ticker"])
+
+    with tab_ins:
+        insiders_tab(market, comp["ticker"], rows)
 
     with tab_filings:
         present = [k for k in ORDER if any(r["category"] == k for r in rows)]
@@ -194,3 +208,73 @@ def discussion(market: str, ticker: str, user: dict) -> None:
             if st.button("Delete", key=f"del-{m['id']}", type="tertiary"):
                 chat.remove(m["id"], user)
                 st.rerun(scope="fragment")
+
+
+def financials_tab(market: str, ticker: str) -> None:
+    data = financials.get(market, ticker)
+    if not data["annual"] and not data["quarter"]:
+        if market in financials.SUPPORTED:
+            st.caption("Financial figures load within a day of adding a company to a watchlist.")
+        else:
+            st.caption("Structured financial figures are available for Korean and US companies. For other markets, "
+                       "see the annual and half-year reports in the Filings tab.")
+        return
+    kinds = [k for k in ("annual", "quarter") if data[k]]
+    kind = st.segmented_control("Period", kinds, default=kinds[0], key="fin-kind", label_visibility="collapsed",
+                                format_func=lambda k: "Yearly" if k == "annual" else "Quarterly") if len(kinds) > 1 else kinds[0]
+    rows = data[kind or kinds[0]]
+    html_block('<div class="fin-grid">' + financials.bars_svg(rows, "revenue", "Revenue")
+               + financials.bars_svg(rows, "op_income", "Operating profit")
+               + financials.bars_svg(rows, "net_income", "Net profit") + "</div>")
+    cur = rows[0]["currency"]
+    body = "".join(f'<tr><td>{esc(r["period"])}</td><td class="num">{financials.money(r["revenue"], cur)}</td>'
+                   f'<td class="num">{financials.money(r["op_income"], cur)}</td>'
+                   f'<td class="num">{financials.money(r["net_income"], cur)}</td>'
+                   f'<td class="num">{(r["op_income"] / r["revenue"] * 100):.1f}%</td></tr>'
+                   if r.get("revenue") and r.get("op_income") is not None else
+                   f'<tr><td>{esc(r["period"])}</td><td class="num">{financials.money(r["revenue"], cur)}</td>'
+                   f'<td class="num">{financials.money(r["op_income"], cur)}</td>'
+                   f'<td class="num">{financials.money(r["net_income"], cur)}</td><td class="num">–</td></tr>'
+                   for r in reversed(rows))
+    html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Period</th><th class="num">Revenue</th>'
+               '<th class="num">Operating profit</th><th class="num">Net profit</th><th class="num">Op. margin</th></tr>'
+               f'{body}</table></div>')
+    st.caption("Source: " + ("DART key accounts (consolidated where available)" if market == "KR" else "SEC company facts (XBRL)")
+               + ". Figures as reported; periods are calendar-aligned.")
+
+
+def insiders_tab(market: str, ticker: str, filings_rows: list[dict]) -> None:
+    rows = insiders.recent(market, ticker)
+    if rows:
+        s = insiders.summary(rows)
+        cur = "USD" if market == "US" else ""
+        stats = [("Shares bought", f"{s['bought']:,.0f}"), ("Shares sold", f"{s['sold']:,.0f}"),
+                 ("Buyers", s["buyers"]), ("Sellers", s["sellers"])]
+        if s["value_bought"] or s["value_sold"]:
+            stats += [("Value bought", financials.money(s["value_bought"], cur)), ("Value sold", financials.money(s["value_sold"], cur))]
+        html_block('<div class="stat-grid">' + "".join(f'<div class="stat"><div class="k">{k}</div><div class="v">{v}</div></div>'
+                                                       for k, v in stats) + "</div>")
+        lines = []
+        for r in rows[:60]:
+            if not r.get("tx_date"):
+                continue
+            price = f'{r["price"]:,.2f}' if r.get("price") else ""
+            after = f'{r["after"]:,.0f}' if r.get("after") is not None else ""
+            kind = insiders.CODE_LABEL.get(r["code"], r["code"])
+            lines.append(f'<tr><td>{r["tx_date"]:%d %b %Y}</td><td class="ko">{esc(r["person"])}</td>'
+                         f'<td>{esc(r["role"])}</td><td>{esc(kind)}</td><td class="num">{(r["shares"] or 0):,.0f}</td>'
+                         f'<td class="num">{price}</td><td class="num">{after}</td></tr>')
+        body = "".join(lines)
+        html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Date</th><th>Who</th><th>Role</th><th>Type</th>'
+                   f'<th class="num">Shares</th><th class="num">Price</th><th class="num">Holds after</th></tr>{body}</table></div>')
+        st.caption("Last 180 days. " + ("From Form 4 filings." if market == "US" else "From DART executive and major shareholder reports."))
+        return
+    insider_filings = [r for r in filings_rows if r.get("category") in ("insider", "ownership")]
+    if insider_filings:
+        st.caption("Insider and ownership filings in the last 180 days:")
+        for r in insider_filings[:20]:
+            render_filing(r, key="ins", show_company=False)
+    elif market in ("US", "KR"):
+        st.caption("No insider trades found yet. They load within a day of adding a company to a watchlist.")
+    else:
+        st.caption("No insider or ownership filings in the last 180 days.")

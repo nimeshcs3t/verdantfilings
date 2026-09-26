@@ -1,0 +1,139 @@
+"""Upcoming dates announced in filings: general meetings, record and payment dates, results releases,
+subscription and listing dates. Extracted by Gemini/Claude when available, else by date patterns."""
+from __future__ import annotations
+
+import json
+import logging
+import re
+from datetime import date, timedelta
+
+from sqlalchemy import and_, delete, insert, or_, select
+from sqlalchemy.exc import IntegrityError
+
+from core.db import events, events_scanned, filings, get_engine, watchlist
+
+from .classify import categorize
+
+log = logging.getLogger(__name__)
+EVENT_CATEGORIES = {"meeting", "dividend", "earnings", "capital", "mna", "buyback", "periodic", "other"}
+MONTHS = {m: i for i, m in enumerate(["january", "february", "march", "april", "may", "june", "july", "august",
+                                      "september", "october", "november", "december"], 1)}
+LABELS = [(("general meeting", "agm", "egm", "shareholders' meeting", "meeting of shareholders"), "General meeting"),
+          (("record date", "cut-off date", "ex-dividend", "ex dividend"), "Record date"),
+          (("payment date", "payable", "paid on", "to be paid"), "Payment date"),
+          (("results", "earnings", "financial statements will", "announcement of"), "Results release"),
+          (("subscription", "offer period", "tender period"), "Subscription period"),
+          (("listing date", "listed on", "trading will commence"), "Listing date")]
+PROMPT = """From this stock-exchange filing, list future dates that investors would want in a calendar:
+general meetings, record dates, ex-dividend and payment dates, results releases, subscription or offer periods,
+listing dates, redemption or conversion dates. Use only dates stated in the text.
+Reply with JSON only: [{{"date": "YYYY-MM-DD", "event": "short label"}}] or [] if there are none.
+
+Filing: {title}
+Filed on: {filed}
+Text:
+{text}"""
+
+
+def _regex_dates(text: str) -> list[tuple[date, str]]:
+    found = []
+    for sentence in re.split(r"(?<=[.;])\s+|\n", text or ""):
+        low = sentence.lower()
+        label = next((lab for words, lab in LABELS if any(w in low for w in words)), None)
+        if not label:
+            continue
+        for m in re.finditer(r"(\d{1,2}) (january|february|march|april|may|june|july|august|september|october|"
+                             r"november|december) (\d{4})", low):
+            found.append((date(int(m[3]), MONTHS[m[2]], int(m[1])), label))
+        for m in re.finditer(r"(january|february|march|april|may|june|july|august|september|october|november|"
+                             r"december) (\d{1,2}),? (\d{4})", low):
+            found.append((date(int(m[3]), MONTHS[m[1]], int(m[2])), label))
+        for m in re.finditer(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", low):
+            try:
+                found.append((date(int(m[1]), int(m[2]), int(m[3])), label))
+            except ValueError:
+                pass
+    return found
+
+
+def _llm_dates(row: dict) -> list[tuple[date, str]] | None:
+    from .summarize import _anthropic, _gemini
+    text = "\n".join(x for x in (row.get("summary_en"), (row.get("body_en") or "")[:8000]) if x)
+    prompt = PROMPT.format(title=row["title_en"], filed=row["filed_date"], text=text)
+    for provider in (_gemini, _anthropic):
+        try:
+            reply = provider(prompt)
+        except Exception:
+            continue
+        if not reply:
+            continue
+        m = re.search(r"\[.*\]", reply, re.S)
+        try:
+            items = json.loads(m.group(0)) if m else []
+        except ValueError:
+            continue
+        out = []
+        for it in items:
+            try:
+                out.append((date.fromisoformat(str(it["date"])[:10]), str(it["event"])[:120]))
+            except (KeyError, ValueError, TypeError):
+                continue
+        return out
+    return None
+
+
+def refresh(limit: int = 15) -> int:
+    """Worker: scan new overviews of watched companies for dates."""
+    with get_engine().connect() as conn:
+        watched = [tuple(r) for r in conn.execute(select(watchlist.c.market, watchlist.c.ticker).distinct())]
+        if not watched:
+            return 0
+        cond = or_(*[and_(filings.c.market == m, filings.c.ticker == t) for m, t in watched])
+        rows = [dict(r) for r in conn.execute(select(filings).where(
+            cond, filings.c.summary_en.is_not(None), filings.c.filed_date >= date.today() - timedelta(days=120),
+            filings.c.uid.not_in(select(events_scanned.c.uid))).order_by(filings.c.filed_date.desc()).limit(limit * 3)).mappings()]
+    done = 0
+    for row in rows:
+        if done >= limit:
+            break
+        if categorize(row["title_en"], row["title_local"]) not in EVENT_CATEGORIES:
+            _mark(row["uid"])
+            continue
+        found = _llm_dates(row)
+        if found is None:
+            found = _regex_dates("\n".join(x for x in (row.get("summary_en"), row.get("body_en")) if x))
+        with get_engine().begin() as conn:
+            conn.execute(delete(events).where(events.c.uid == row["uid"]))
+            for day, label in {(d, l) for d, l in found if d >= row["filed_date"]}:
+                conn.execute(insert(events).values(uid=row["uid"], event_date=day, label=label,
+                                                   market=row["market"], ticker=row["ticker"]))
+        _mark(row["uid"])
+        done += 1
+    return done
+
+
+def _mark(uid: str) -> None:
+    try:
+        with get_engine().begin() as conn:
+            conn.execute(insert(events_scanned).values(uid=uid))
+    except IntegrityError:
+        pass
+
+
+def upcoming(pairs: list[tuple[str, str]], days: int = 60) -> list[dict]:
+    if not pairs:
+        return []
+    cond = or_(*[and_(events.c.market == m, events.c.ticker == t) for m, t in pairs])
+    today = date.today()
+    with get_engine().connect() as conn:
+        rows = conn.execute(select(events, filings.c.company_name, filings.c.url, filings.c.title_en)
+                            .select_from(events.join(filings, filings.c.uid == events.c.uid))
+                            .where(cond, events.c.event_date >= today, events.c.event_date <= today + timedelta(days=days))
+                            .order_by(events.c.event_date)).mappings().all()
+    seen, out = set(), []
+    for r in rows:
+        key = (r["market"], r["ticker"], r["event_date"], r["label"].lower())
+        if key not in seen:
+            seen.add(key)
+            out.append(dict(r))
+    return out

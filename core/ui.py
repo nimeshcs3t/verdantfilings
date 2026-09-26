@@ -121,6 +121,31 @@ def css() -> str:
 .msg-when {{ color:var(--muted); font-size:.8rem; margin-left:8px; font-weight:400; }}
 .msg-body {{ margin-top:3px; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.5; color:var(--ink); }}
 
+.brief-box {{ border:1px solid var(--rule); border-left:3px solid var(--pine); border-radius:6px; padding:12px 14px;
+              margin:4px 0 12px; color:var(--ink); line-height:1.55; }}
+.brief-box .meta {{ color:var(--muted); font-size:.78rem; margin-top:6px; }}
+.events {{ display:flex; flex-wrap:wrap; gap:8px; margin:0 0 12px; }}
+.event {{ border:1px solid var(--rule); border-radius:6px; padding:6px 10px; font-size:.85rem; color:var(--ink); }}
+.event b {{ color:var(--pine); margin-right:6px; font-variant-numeric:tabular-nums; }}
+.ev-row {{ padding:8px 0; border-top:1px solid var(--rule); font-size:.9rem; color:var(--ink); }}
+.ev-row b {{ color:var(--pine); margin-right:8px; font-variant-numeric:tabular-nums; }}
+.ev-row span {{ color:var(--muted); }}
+.fin-grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:12px; margin:6px 0 10px; }}
+.fin {{ border:1px solid var(--rule); border-radius:8px; padding:10px 12px 6px; }}
+.fin-head {{ display:flex; justify-content:space-between; font-size:.85rem; color:var(--muted); margin-bottom:4px; }}
+.fin-head b {{ color:var(--ink); }}
+.fin svg {{ width:100%; height:120px; display:block; }}
+.fin rect.pos {{ fill:var(--pine); }} .fin rect.neg {{ fill:var(--down); }}
+.fin .axis {{ stroke:var(--rule); }}
+.fin text {{ font-size:9px; fill:var(--muted); }}
+.tbl {{ width:100%; border-collapse:collapse; font-size:.9rem; color:var(--ink); }}
+.tbl th {{ text-align:left; color:var(--muted); font-weight:500; font-size:.8rem; padding:6px 8px; border-bottom:1px solid var(--rule); }}
+.tbl td {{ padding:8px; border-bottom:1px solid var(--rule); vertical-align:middle; font-variant-numeric:tabular-nums; }}
+.tbl td.num, .tbl th.num {{ text-align:right; }}
+.tbl-wrap {{ overflow-x:auto; }}
+.stat-grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin:6px 0 12px; }}
+.stat {{ border:1px solid var(--rule); border-radius:8px; padding:10px 12px; }}
+.stat .k {{ color:var(--muted); font-size:.78rem; }} .stat .v {{ font-size:1.25rem; font-weight:600; color:var(--ink); }}
 .empty {{ border:1px dashed var(--rule); padding:18px 20px; color:var(--muted); margin:8px 0 16px; border-radius:6px; }}
 .brand {{ font-size:2.2rem; font-weight:700; letter-spacing:-0.02em; color:var(--ink); margin:3rem 0 .3rem; }}
 @media (max-width:640px) {{

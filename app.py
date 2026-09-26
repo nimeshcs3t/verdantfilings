@@ -11,7 +11,7 @@ from core.auth import ensure_admin  # noqa: E402
 from core.db import get_engine  # noqa: E402
 from core.session import apply_cookie_changes, current_user  # noqa: E402
 from core.ui import inject_css  # noqa: E402
-from views import account, admin, company, search, signin, today, watchlist  # noqa: E402
+from views import account, admin, company, portfolio, search, signin, today, watchlist  # noqa: E402
 
 
 @st.cache_resource(show_spinner=False)
@@ -39,6 +39,7 @@ pages = {
     "today": st.Page(today.page, title="Today", url_path="today", default=True),
     "company": st.Page(company.page, title="Companies", url_path="company"),
     "watchlist": st.Page(watchlist.page, title="Watchlist", url_path="watchlist"),
+    "portfolio": st.Page(portfolio.page, title="Portfolio", url_path="portfolio"),
     "search": st.Page(search.page, title="Search", url_path="search"),
     "account": st.Page(account.page, title="Account", url_path="account"),
 }

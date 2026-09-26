@@ -5,7 +5,7 @@ import streamlit as st
 from core.config import direct_fetch
 from core.db import as_utc
 from core.ui import chip_html, esc, html_block, logo_html, long_date, page_header, relative_time
-from services import personal, watch
+from services import events as events_svc, personal, watch
 from services.classify import ORDER, categorize, label
 from services.pipeline import filings_for, sync_company
 from sources import get_source
@@ -117,6 +117,11 @@ def page() -> None:
             st.caption(credit)
 
     with side:
+        coming = events_svc.upcoming([(w["market"], w["ticker"]) for w in all_wl], days=30)
+        if coming:
+            html_block('<div class="section" style="margin-top:.2rem">Coming up</div>' + "".join(
+                f'<div class="ev-row"><b>{e["event_date"]:%d %b}</b>{esc(e["label"])} <span>{esc(e["company_name"])}</span></div>'
+                for e in coming[:8]))
         html_block('<div class="section" style="margin-top:.2rem">Headlines</div>')
         items = []
         for w in all_wl[:6]:

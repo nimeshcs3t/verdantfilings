@@ -64,6 +64,13 @@ Each user has a `plan` (`free` or `pro`). Plans already limit watchlist size (`F
 small webhook that sets `plan = 'pro'`. Other natural pro features: Telegram alerts, full-document translation,
 more companies, CSV export.
 
+## Poland (NewConnect)
+
+Reads ESPI and EBI reports of NewConnect companies from the exchange's website (no key). Unofficial: PAP
+sells the official feed. Titles are translated from Polish; many reports include the company's own English
+version, which is used for overviews. Turn on with `ENABLE_NEWCONNECT = "true"` in GitHub Actions secrets
+and Streamlit secrets.
+
 ## Australia (ASX)
 
 Reads the data service behind the ASX website: no key, English, with ASX's own "price sensitive" flag.

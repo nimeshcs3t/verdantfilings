@@ -13,6 +13,7 @@ from .base import Company, Filing, FilingSource, SourceBusy
 from .il_tase import TaseSource
 from .jp_edinet import EdinetSource
 from .kr_dart import DartSource
+from .pl_newconnect import NewConnectSource
 from .us_edgar import EdgarSource
 
 _REGISTRY: dict[str, FilingSource] = {}
@@ -37,5 +38,6 @@ def configured_sources() -> list[FilingSource]:
 register(DartSource())
 register(EdgarSource())
 register(AsxSource())
+register(NewConnectSource())
 register(TaseSource())
 register(EdinetSource())

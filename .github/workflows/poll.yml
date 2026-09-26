@@ -28,6 +28,7 @@ jobs:
           SEC_CONTACT_EMAIL: ${{ secrets.SEC_CONTACT_EMAIL }}
           ENABLE_ASX: ${{ secrets.ENABLE_ASX }}
           ASX_ALERTS: ${{ secrets.ASX_ALERTS }}
+          ENABLE_NEWCONNECT: ${{ secrets.ENABLE_NEWCONNECT }}
           TASE_API_KEY: ${{ secrets.TASE_API_KEY }}
           TASE_MAYA_PATH: ${{ secrets.TASE_MAYA_PATH }}
           TASE_DAILY_CALL_LIMIT: ${{ secrets.TASE_DAILY_CALL_LIMIT }}

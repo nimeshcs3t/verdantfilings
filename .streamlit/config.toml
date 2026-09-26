@@ -1,17 +1,25 @@
-[theme]
-base = "light"
-primaryColor = "#1F6B4F"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F2F5F3"
-textColor = "#1B2430"
+   [theme]
+   font = "sans serif"
 
-[client]
-toolbarMode = "minimal"
-showSidebarNavigation = false
+   [theme.light]
+   primaryColor = "#1F6B4F"
+   backgroundColor = "#FFFFFF"
+   secondaryBackgroundColor = "#F2F5F3"
+   textColor = "#1B2430"
 
-[server]
-enableXsrfProtection = true
-fileWatcherType = "none"
+   [theme.dark]
+   primaryColor = "#5DBE93"
+   backgroundColor = "#0F1413"
+   secondaryBackgroundColor = "#1A211F"
+   textColor = "#E4E9E6"
 
-[browser]
-gatherUsageStats = false
+   [client]
+   toolbarMode = "viewer"
+   showSidebarNavigation = false
+
+   [server]
+   enableXsrfProtection = true
+   fileWatcherType = "none"
+
+   [browser]
+   gatherUsageStats = false

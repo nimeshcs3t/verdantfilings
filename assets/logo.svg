@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="32" viewBox="0 0 220 32">
+  <rect x="0" y="5" width="4" height="22" fill="#1F6B4F"/>
+  <rect x="7" y="11" width="4" height="16" fill="#1F6B4F" opacity="0.55"/>
+  <text x="20" y="23" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#1B2430">Verdant Filings</text>
+</svg>

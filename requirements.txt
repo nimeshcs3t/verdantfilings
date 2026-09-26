@@ -1,0 +1,9 @@
+streamlit>=1.50
+SQLAlchemy>=2.0
+psycopg2-binary>=2.9
+bcrypt>=4.1
+requests>=2.31
+beautifulsoup4>=4.12
+feedparser>=6.0
+deep-translator>=1.11
+tzdata

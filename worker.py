@@ -12,6 +12,6 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     stats = run_once()
     logging.info("listings %(listed)s, companies %(companies)s, new filings %(new)s, overviews %(summaries)s, "
-                 "alerts %(alerts)s, errors %(errors)s", stats)
+                 "alerts %(alerts)s, errors %(errors)s, titles translated %(retranslated)s", {"retranslated": 0, **stats})
     if stats["errors"] and not stats["companies"]:
         raise SystemExit(1)

@@ -5,11 +5,17 @@ import hashlib
 import re
 import time
 
+import requests
 from deep_translator import GoogleTranslator
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 
+from core.config import get_secret
 from core.db import get_engine, translations
+
+LANG_NAMES = {"ko": "Korean", "ja": "Japanese", "pl": "Polish", "iw": "Hebrew", "he": "Hebrew", "zh": "Chinese"}
+MYMEMORY_CODES = {"iw": "he"}
+_google_paused_until = 0.0     # Google refuses shared cloud servers; stop asking for a while after a refusal
 
 # Keys have spaces removed. Exact matches only; everything else goes to machine translation.
 GLOSSARY = {
@@ -104,11 +110,59 @@ def _cache_put(key: str, text_en: str) -> None:
         pass
 
 
-def _machine(text: str, src: str) -> str | None:
+def _google(text: str, src: str) -> str | None:
+    global _google_paused_until
+    if time.time() < _google_paused_until:
+        return None
     try:
         return GoogleTranslator(source=src or "auto", target="en").translate(text) or None
-    except Exception:
+    except Exception as exc:
+        if "TooManyRequests" in type(exc).__name__ or "too many requests" in str(exc).lower():
+            _google_paused_until = time.time() + 1800
         return None
+
+
+def _llm(text: str, src: str) -> str | None:
+    """Gemini (free tier) or Claude, if a key is set. Keeps one output line per input line."""
+    from .summarize import _anthropic, _gemini
+    language = LANG_NAMES.get(src, "the original language")
+    prompt = (f"Translate this {language} text from a company's stock-exchange filing into clear English. "
+              "Keep the line breaks: return exactly one line of English for each line of input, in the same "
+              "order. Return only the translation, with no notes.\n\n" + text)
+    for provider in (_gemini, _anthropic):
+        try:
+            result = provider(prompt)
+            if result:
+                return result.strip()
+        except Exception:
+            continue
+    return None
+
+
+def _mymemory(text: str, src: str) -> str | None:
+    """Free MyMemory service, no key. Up to 500 characters per request, so only for short text."""
+    if src in ("auto", "", None) or len(text) > 480 or "\n" in text:
+        return None     # one line at a time, so each title keeps its own translation
+    params = {"q": text, "langpair": f"{MYMEMORY_CODES.get(src, src)}|en"}
+    email = get_secret("TRANSLATE_CONTACT_EMAIL") or get_secret("SEC_CONTACT_EMAIL")
+    if email:
+        params["de"] = email       # raises the free daily allowance
+    try:
+        data = requests.get("https://api.mymemory.translated.net/get", params=params, timeout=20).json()
+        english = (data.get("responseData") or {}).get("translatedText")
+        if data.get("responseStatus") in (200, "200") and english and "MYMEMORY WARNING" not in english:
+            return english
+    except Exception:
+        pass
+    return None
+
+
+def _machine(text: str, src: str) -> str | None:
+    for translator in (_google, _llm, _mymemory):
+        result = translator(text, src)
+        if result and result.strip() and result.strip() != text.strip():
+            return result
+    return None
 
 
 def _chunks(text: str, size: int = 4500):
@@ -182,11 +236,25 @@ def translate_lines(lines: list[str], src: str) -> list[str]:
         if cached is None:
             missing.append(i)
     if missing:
-        joined = _machine("\n".join(lines[i] for i in missing), src)
-        parts = joined.split("\n") if joined else []
+        joined = _machine("\n".join(lines[i] for i in missing), src) if len(missing) > 1 else None
+        parts = [p for p in joined.split("\n") if p.strip()] if joined else []
         if len(parts) != len(missing):
-            parts = [_machine(lines[i], src) or lines[i] for i in missing]
+            parts = [_machine(lines[i], src) for i in missing]
         for i, en in zip(missing, parts):
-            results[i] = en.strip()
-            _cache_put(_cache_key(lines[i], src), results[i])
+            if en and en.strip():
+                results[i] = en.strip()
+                _cache_put(_cache_key(lines[i], src), results[i])   # only real translations are saved
     return [r or lines[i] for i, r in enumerate(results)]
+
+
+def glossary_or_cached(title: str, src: str) -> str | None:
+    """A title's English from the glossary or earlier translations, without calling a translator."""
+    if not title or src == "en":
+        return title
+    cached = _cache_get(_cache_key(title, src))
+    if cached:
+        return cached
+    english = _glossary_title(title, src) if src == "ko" else None
+    if english:
+        _cache_put(_cache_key(title, src), english)
+    return english

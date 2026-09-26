@@ -64,6 +64,13 @@ Each user has a `plan` (`free` or `pro`). Plans already limit watchlist size (`F
 small webhook that sets `plan = 'pro'`. Other natural pro features: Telegram alerts, full-document translation,
 more companies, CSV export.
 
+## Translation
+
+Titles and filing text are translated with Google Translate first. Google often refuses requests from shared
+cloud servers such as GitHub's, so the app then uses Gemini (if `GEMINI_API_KEY` is set; free tier at
+https://aistudio.google.com/apikey) and finally MyMemory (free, no key, one title at a time; the SEC contact
+email raises its daily allowance). Titles that couldn't be translated are retried on later runs.
+
 ## Poland (NewConnect)
 
 Reads ESPI and EBI reports of NewConnect companies from the exchange's website (no key). Unofficial: PAP

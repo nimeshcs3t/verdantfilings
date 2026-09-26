@@ -20,7 +20,7 @@ from sources import Company, SourceBusy, configured_sources, get_source
 
 from . import telegram
 from .summarize import summarize
-from .translate import translate_text, translate_title
+from .translate import glossary_or_cached, translate_lines, translate_text, translate_title
 
 log = logging.getLogger(__name__)
 SYNC_INTERVAL = timedelta(minutes=10)
@@ -133,13 +133,18 @@ def sync_company(market: str, ticker: str, force: bool = False) -> int:
     if uids:
         with get_engine().connect() as conn:
             existing = set(conn.execute(select(filings.c.uid).where(filings.c.uid.in_(uids))).scalars())
+    fresh = [f for f in found if f.uid not in existing]
+    english = {f.uid: f.title_en or glossary_or_cached(f.title_local, src.source_lang) for f in fresh}
+    todo = [f for f in fresh if not english[f.uid]]
+    for i in range(0, len(todo), 40):          # translate in batches: fewer requests to the translators
+        batch = todo[i:i + 40]
+        for f, en in zip(batch, translate_lines([f.title_local for f in batch], src.source_lang)):
+            english[f.uid] = en
     new = 0
-    for f in found:
-        if f.uid in existing:
-            continue
+    for f in fresh:
         row = dict(uid=f.uid, market=f.market, ticker=f.ticker, company_name=comp["name_en"] or f.company_name,
                    filed_date=f.filed_date, title_local=f.title_local,
-                   title_en=f.title_en or translate_title(f.title_local, src.source_lang), filer=f.filer, url=f.url,
+                   title_en=english[f.uid] or f.title_local, filer=f.filer, url=f.url,
                    notified=False, created_at=utcnow())
         try:
             with get_engine().begin() as conn:
@@ -294,6 +299,30 @@ def notify_pending() -> int:
     return sent
 
 
+def retranslate_titles(limit: int = 200) -> int:
+    """Worker only: translate titles that were stored untranslated because every translator refused."""
+    fixed = 0
+    for src in configured_sources():
+        if src.source_lang in ("en", "auto"):
+            continue
+        with get_engine().connect() as conn:
+            rows = conn.execute(select(filings.c.uid, filings.c.title_local).where(
+                filings.c.market == src.market, filings.c.title_en == filings.c.title_local)
+                .order_by(filings.c.filed_date.desc()).limit(limit)).all()
+        if not rows:
+            continue
+        titles = [r.title_local for r in rows]
+        english = []
+        for i in range(0, len(titles), 40):
+            english += translate_lines(titles[i:i + 40], src.source_lang)
+        with get_engine().begin() as conn:
+            for r, en in zip(rows, english):
+                if en and en != r.title_local:
+                    conn.execute(update(filings).where(filings.c.uid == r.uid).values(title_en=en))
+                    fixed += 1
+    return fixed
+
+
 def run_once() -> dict:
     """One full worker cycle. Used by worker.py."""
     stats = {"listed": 0, "companies": 0, "new": 0, "summaries": 0, "errors": 0, "alerts": 0}
@@ -309,6 +338,10 @@ def run_once() -> dict:
         except Exception as exc:
             stats["errors"] += 1
             log.warning("sync failed for %s:%s: %s", market, ticker, exc)
+    try:
+        stats["retranslated"] = retranslate_titles()
+    except Exception as exc:
+        log.warning("retranslation failed: %s", exc)
     stats["summaries"] = process_overviews()
     stats["alerts"] = notify_pending()
     return stats

@@ -26,12 +26,15 @@ REPORTS_PAGE = f"{BASE}/spolki-komunikaty-spolek"
 COMPANIES_PAGE = f"{BASE}/spolki"
 AJAX = f"{BASE}/ajaxindex.php"
 REPORT = f"{BASE}/komunikat?geru_id={{}}"
+COMPANY_PAGE = f"{BASE}/spolka?isin={{}}"
+TAB_FALLBACK = (f"{AJAX}?start=reportsTab&type={{kind}}&gls_id=2003&target_show_{{name}}_page=spolka"
+                f"&action=GPWListaSp&gls_isin={{isin}}&format=html&lang=PL")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                          "Chrome/140.0.0.0 Safari/537.36",
            "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8"}
 PAUSE = 0.5
 PAGE_SIZE = 100
-MAX_PAGES = 40
+MAX_PAGES = 80
 ISIN_RE = re.compile(r"\(([A-Z]{2}[A-Z0-9]{9}\d)\)")
 PL_SUFFIX = re.compile(r"\s*(SPÓŁKA AKCYJNA|SPOLKA AKCYJNA|S\.\s?A\.?|SA|SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ|"
                        r"SP\.\s?Z O\.\s?O\.?|PLC|LIMITED|LTD\.?|INC\.?)\s*$", re.I)
@@ -58,8 +61,8 @@ class NewConnectSource(FilingSource):
     ticker_hint = "NewConnect symbol, e.g. 4MB, or company name"
     news_local = {"hl": "pl", "gl": "PL", "ceid": "PL:pl"}
     attribution = "Source: NewConnect, Warsaw Stock Exchange (GPW)"
-    backfill_days = 14
-    incremental_days = 1
+    backfill_days = 180           # loaded from the company's own ESPI and EBI tabs
+    incremental_days = 1          # later runs use the market-wide scan
 
     def __init__(self):
         self._session: requests.Session | None = None
@@ -84,7 +87,7 @@ class NewConnectSource(FilingSource):
         if wait > 0:
             time.sleep(wait)
         self._last_call = time.time()
-        if method == "POST":
+        if method == "POST" or "ajaxindex.php" in url:
             kwargs.setdefault("headers", {})["X-Requested-With"] = "XMLHttpRequest"
         r = self._http().request(method, url, timeout=60, **kwargs)
         r.raise_for_status()
@@ -235,11 +238,65 @@ class NewConnectSource(FilingSource):
         self._scan = (time.time(), start, rows)
         return rows
 
-    def list_filings(self, company: Company, start: date, end: date) -> list[Filing]:
-        out = []
-        for r in self._reports_since(start):
-            if r["isin"] != company.source_id or not start <= r["date"] <= end:
+    def _tab_urls(self, isin: str) -> list[tuple[str, str]]:
+        """The company page's ESPI and EBI tab addresses (read from the page, with a known fallback)."""
+        urls = []
+        try:
+            soup = BeautifulSoup(self._call("GET", COMPANY_PAGE.format(isin)).text, "html.parser")
+            for a in soup.find_all("a", attrs={"data-href": re.compile(r"start=reportsTab")}):
+                href = a["data-href"]
+                system = "ESPI" if "type=e" in href else "EBI"
+                if (system, href) not in urls:
+                    urls.append((system, href))
+        except Exception:
+            pass
+        return urls or [("ESPI", TAB_FALLBACK.format(kind="e", name="espi", isin=isin)),
+                        ("EBI", TAB_FALLBACK.format(kind="b", name="ebi", isin=isin))]
+
+    @staticmethod
+    def _parse_tab(html: str, system: str, company: str, isin: str) -> list[dict]:
+        out, seen = [], set()
+        for a in BeautifulSoup(html, "html.parser").find_all("a", href=re.compile(r"geru_id=\d+")):
+            gid = re.search(r"geru_id=(\d+)", a["href"]).group(1)
+            if gid in seen:
                 continue
+            row = a.find_parent(["tr", "li"]) or a.parent
+            text = " ".join(row.get_text(" ", strip=True).split())
+            iso = re.search(r"(\d{4})-(\d{2})-(\d{2})", text)
+            dmy = re.search(r"(\d{2})-(\d{2})-(\d{4})", text)
+            if iso:
+                day = date(int(iso[1]), int(iso[2]), int(iso[3]))
+            elif dmy:
+                day = date(int(dmy[3]), int(dmy[2]), int(dmy[1]))
+            else:
+                continue
+            seen.add(gid)
+            kind = next((k for k in TYPE_EN if k in text), "Bieżący")
+            number = (re.search(r"(\d+/\d{4})", text) or [None, ""])[1]
+            title = " ".join(a.get_text(" ", strip=True).split())
+            if not title or re.fullmatch(r"[\d\-: ]+", title):
+                title = re.sub(r"^.*?\d+/\d{4}\s*", "", text)
+            out.append({"gid": gid, "date": day, "kind": kind, "system": system, "number": number,
+                        "isin": isin, "company": company, "title": title})
+        return out
+
+    def _company_history(self, company: Company) -> list[dict]:
+        rows = []
+        for system, url in self._tab_urls(company.source_id):
+            try:
+                rows += self._parse_tab(self._call("GET", url).text, system, company.name_local, company.source_id)
+            except Exception:
+                continue   # history is a bonus; the market scan still finds new reports
+        return rows
+
+    def list_filings(self, company: Company, start: date, end: date) -> list[Filing]:
+        out, seen = [], set()
+        # First load: read this company's own report tabs, however rarely it files.
+        history = self._company_history(company) if (end - start).days > 7 else []
+        for r in history + self._reports_since(max(start, end - timedelta(days=7))):
+            if r["gid"] in seen or r["isin"] != company.source_id or not start <= r["date"] <= end:
+                continue
+            seen.add(r["gid"])
             label = f"{r['system']} {r['number']}".strip()
             title = r["title"] or r["kind"]
             out.append(Filing(uid=f"PL:{r['gid']}", market=self.market, ticker=company.ticker,

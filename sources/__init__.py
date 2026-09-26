@@ -2,12 +2,14 @@
 
 Candidates for later:
   US  SEC EDGAR    https://www.sec.gov/edgar/sec-api-documentation (free, no key)
+  IL  TASE MAYA      added (paid feed with free trial)
   JP  EDINET       https://disclosure2.edinet-fsa.go.jp (free key)
   HK  HKEXnews     https://www.hkexnews.hk
   TW  MOPS         https://mops.twse.com.tw
   IN  BSE/NSE      corporate announcements feeds
 """
-from .base import Company, Filing, FilingSource
+from .base import Company, Filing, FilingSource, SourceBusy
+from .il_tase import TaseSource
 from .kr_dart import DartSource
 
 _REGISTRY: dict[str, FilingSource] = {}
@@ -30,3 +32,4 @@ def configured_sources() -> list[FilingSource]:
 
 
 register(DartSource())
+register(TaseSource())

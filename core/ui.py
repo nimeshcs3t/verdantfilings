@@ -29,6 +29,7 @@ CSS = """
 .fl-tk { color:var(--muted); font-weight:400; margin-left:6px; font-size:.85rem; font-variant-numeric:tabular-nums; }
 .fl-title { font-size:1.03rem; color:var(--ink); margin-top:2px; line-height:1.4; }
 .fl-orig { color:var(--muted); font-size:.85rem; margin-top:2px; }
+.fl-tk + .fl-tk { margin-left:10px; }
 .fl-link a { color:var(--pine); text-decoration:none; font-size:.86rem; font-weight:500; white-space:nowrap; }
 .fl-link a:hover, .fl-link a:focus-visible { text-decoration:underline; }
 .fl-new { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--amber); margin-right:7px; vertical-align:2px; }
@@ -105,10 +106,11 @@ def summary_html(text: str) -> str:
     return '<div class="summary"><ul>' + "".join(f"<li>{esc(i)}</li>" for i in items) + "</ul></div>"
 
 
-def filing_row_html(f: dict, show_company: bool = True, is_new: bool = False) -> str:
+def filing_row_html(f: dict, show_company: bool = True, is_new: bool = False, country: str = "") -> str:
     dot = '<span class="fl-new" title="Added in the last 2 hours"></span>' if is_new else ""
-    company = (f'<div class="fl-co">{dot}{esc(f["company_name"])}<span class="fl-tk">{esc(f["ticker"])}</span></div>'
-               if show_company else "")
+    where = f'<span class="fl-tk">{esc(country)}</span>' if country else ""
+    company = (f'<div class="fl-co">{dot}{esc(f["company_name"])}<span class="fl-tk">{esc(f["ticker"])}</span>'
+               f'{where}</div>' if show_company else "")
     title_style = "" if show_company else ' style="margin-top:0"'
     title_dot = dot if not show_company else ""
     orig = ""

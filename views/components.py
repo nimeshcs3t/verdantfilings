@@ -14,10 +14,11 @@ from services.pipeline import enrich_filing, is_queued, search_companies
 from sources import configured_sources, get_source
 
 
-def render_filing(f: dict, key: str, show_company: bool = True, link_company: bool = True) -> None:
+def render_filing(f: dict, key: str, show_company: bool = True, link_company: bool = True,
+                  country: str = "") -> None:
     created = as_utc(f.get("created_at"))
     is_new = bool(created and utcnow() - created < timedelta(hours=2))
-    html_block(filing_row_html(f, show_company, is_new))
+    html_block(filing_row_html(f, show_company, is_new, country))
     with st.expander("Overview and translation"):
         if f.get("summary_en"):
             _show_enriched(f)

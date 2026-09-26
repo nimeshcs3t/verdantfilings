@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from core.config import direct_fetch, get_secret
 from core.db import (as_utc, companies, enrich_queue, filings, get_engine, listed_companies, users, utcnow,
                      watchlist)
-from sources import Company, configured_sources, get_source
+from sources import Company, SourceBusy, configured_sources, get_source
 
 from . import telegram
 from .summarize import summarize
@@ -121,9 +121,12 @@ def sync_company(market: str, ticker: str, force: bool = False) -> int:
         return 0
     src = get_source(market)
     today = src.today()
-    start = today - timedelta(days=7 if last else 90)
+    start = today - timedelta(days=src.incremental_days if last else src.backfill_days)
     company = Company(comp["market"], comp["ticker"], comp["source_id"], comp["name_local"], comp["name_en"])
-    found = src.list_filings(company, start, today)
+    try:
+        found = src.list_filings(company, start, today)
+    except SourceBusy:
+        return 0          # usage budget: try again on a later run, without marking the company synced
 
     uids = [f.uid for f in found]
     existing = set()

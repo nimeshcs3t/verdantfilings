@@ -4,6 +4,7 @@ from core import nav
 from core.plans import watchlist_limit
 from core.ui import esc, html_block, page_header
 from services import telegram, watch
+from sources import get_source
 
 from .components import add_company_form
 
@@ -23,9 +24,11 @@ def page() -> None:
         st.caption("Connect Telegram on the Account page to get an alert when these companies file.")
 
     html_block('<div class="section">Companies</div>')
+    several = len({w["market"] for w in wl}) > 1
     for w in wl:
+        country = f'<span class="fl-tk">{esc(get_source(w["market"]).country)}</span>' if several else ""
         c1, c2, c3, c4 = st.columns([3.2, 1.2, 0.9, 0.9], vertical_alignment="center")
-        c1.markdown(f'<div class="fl-co">{esc(w["name_en"])}<span class="fl-tk">{esc(w["ticker"])}</span></div>'
+        c1.markdown(f'<div class="fl-co">{esc(w["name_en"])}<span class="fl-tk">{esc(w["ticker"])}</span>{country}</div>'
                     f'<div class="fl-orig ko">{esc(w["name_local"])}</div>', unsafe_allow_html=True)
         on = c2.toggle("Alerts", value=bool(w["notify"]), key=f"n-{w['market']}-{w['ticker']}")
         if on != bool(w["notify"]):

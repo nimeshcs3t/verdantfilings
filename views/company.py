@@ -29,7 +29,9 @@ def page() -> None:
     top_left, top_right = st.columns([1.2, 1], vertical_alignment="bottom")
     with top_left:
         options = [(w["market"], w["ticker"]) for w in wl]
-        labels = {(w["market"], w["ticker"]): f'{w["name_en"]}  ({w["ticker"]})' for w in wl}
+        several = len({w["market"] for w in wl}) > 1
+        labels = {(w["market"], w["ticker"]): f'{w["name_en"]}  ({w["ticker"]})'
+                  + (f'  {get_source(w["market"]).country}' if several else "") for w in wl}
         if sel and sel not in options:
             options.insert(0, sel)
         if options:

@@ -64,6 +64,19 @@ Each user has a `plan` (`free` or `pro`). Plans already limit watchlist size (`F
 small webhook that sets `plan = 'pro'`. Other natural pro features: Telegram alerts, full-document translation,
 more companies, CSV export.
 
+## Israel (TASE MAYA)
+
+1. Create an account at https://datahub.tase.co.il, subscribe to "Market Announcements feed (MAYA)"
+   (free trial: 100 requests / 4 weeks) and copy your API key.
+2. In the TASE developer portal, find the "reports by date" interface of that product and copy its path,
+   replacing the date parts with placeholders, e.g. `group/reports-by-date/{yyyy}/{m}/{d}`.
+3. GitHub Actions secrets: `TASE_API_KEY`, `TASE_MAYA_PATH`, and optionally `TASE_DAILY_CALL_LIMIT`
+   (default 3 a day, spread across the day, to fit the trial). Streamlit secrets: `TASE_API_KEY`.
+4. Run the "TASE probe" workflow once to check the connection and the response format.
+
+Tickers are TASE symbols (TEVA, LUMI, POLI). The company list comes from TASE's free endpoints.
+On a paid plan, raise TASE_DAILY_CALL_LIMIT (for example to 300) so every run checks MAYA.
+
 ## Adding a country
 
 Write `sources/<cc>_<name>.py` with a class that subclasses `FilingSource` (see `sources/base.py` and

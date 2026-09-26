@@ -7,6 +7,10 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 
+class SourceBusy(Exception):
+    """A regulator call was skipped to stay within a usage budget. Not an error; try again later."""
+
+
 @dataclass
 class Company:
     market: str
@@ -36,6 +40,8 @@ class FilingSource(ABC):
     timezone = "UTC"
     ticker_hint = ""
     news_local: dict | None = None   # Google News params for local-language press
+    backfill_days = 90      # history to load when a company is first added
+    incremental_days = 7    # window re-checked on each later sync
 
     def today(self) -> date:
         return datetime.now(ZoneInfo(self.timezone)).date()

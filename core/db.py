@@ -119,6 +119,14 @@ enrich_queue = Table(
     Column("requested_at", DateTime(timezone=True), default=utcnow),
 )
 
+api_usage = Table(
+    "api_usage", metadata,            # paid/limited API calls per market per day
+    Column("market", String(8), primary_key=True),
+    Column("day", String(10), primary_key=True),
+    Column("calls", Integer, nullable=False, default=0),
+    Column("last_call", DateTime(timezone=True)),
+)
+
 _engine: Engine | None = None
 _lock = threading.Lock()
 

@@ -1,85 +1,16 @@
-name: NewConnect check
+   name: NewConnect check
 
-on: workflow_dispatch
+   on: workflow_dispatch
 
-jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - run: pip install requests beautifulsoup4
-      - name: Test NewConnect forms
-        run: |
-          python - <<'EOF'
-          import re
-          import requests
-          from bs4 import BeautifulSoup
-
-          s = requests.Session()
-          s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-                            "Accept-Language": "pl-PL,pl;q=0.9"})
-
-          def forms(label, url):
-              print(f"\n=== {label} forms ===")
-              soup = BeautifulSoup(s.get(url, timeout=30).text, "html.parser")
-              found = []
-              for f in soup.find_all("form"):
-                  fields = [(i.get("name"), i.get("value")) for i in f.find_all(["input", "select"]) if i.get("name")]
-                  if not fields:
-                      continue
-                  print("form id=", f.get("id"), "class=", f.get("class"), "target=", f.get("data-target"))
-                  shown = {}
-                  for name, value in fields:
-                      if name not in shown:
-                          shown[name] = value
-                  for name, value in list(shown.items())[:30]:
-                      print("   ", name, "=", value)
-                  found.append(shown)
-              return found
-
-          rep_forms = forms("Reports", "https://newconnect.pl/spolki-komunikaty-spolek")
-          com_forms = forms("Companies", "https://newconnect.pl/spolki")
-
-          print("\n=== Try loading more companies ===")
-          for fields in com_forms:
-              if not any("offset" in k or "limit" in k or "start" in k for k in fields):
-                  continue
-              data = {k: (v or "") for k, v in fields.items()}
-              for k in list(data):
-                  if "limit" in k:
-                      data[k] = "500"
-                  if "offset" in k:
-                      data[k] = "0"
-              r = s.post("https://newconnect.pl/ajaxindex.php", data=data, timeout=60)
-              print("status", r.status_code, "| size", len(r.text), "| company links:", r.text.count("spolka?isin="))
-              print("sample:", " ".join(re.sub(r"<[^>]+>", " ", r.text).split())[:300])
-              break
-
-          print("\n=== Try loading more reports ===")
-          for fields in rep_forms:
-              if not any("offset" in k or "limit" in k or "start" in k for k in fields):
-                  continue
-              data = {k: (v or "") for k, v in fields.items()}
-              for k in list(data):
-                  if "offset" in k:
-                      data[k] = "20"
-              r = s.post("https://newconnect.pl/ajaxindex.php", data=data, timeout=60)
-              print("status", r.status_code, "| size", len(r.text), "| report links:", r.text.count("geru_id="))
-              print("sample:", " ".join(re.sub(r"<[^>]+>", " ", r.text).split())[:300])
-              break
-
-          print("\n=== Report page content ===")
-          html = s.get("https://newconnect.pl/spolki-komunikaty-spolek", timeout=30).text
-          gid = re.findall(r"geru_id=(\d+)", html)[0]
-          soup = BeautifulSoup(s.get(f"https://newconnect.pl/komunikat?geru_id={gid}", timeout=30).text, "html.parser")
-          for tag in soup.find_all(["div", "section", "table"], id=True):
-              text = " ".join(tag.get_text(" ", strip=True).split())
-              if 200 < len(text) < 20000 and "Lista spółek" not in text:
-                  print("id=", tag.get("id"), "| chars", len(text), "|", text[:250])
-          for tag in soup.find_all(["div", "table"], class_=True):
-              text = " ".join(tag.get_text(" ", strip=True).split())
-              if 300 < len(text) < 15000 and "Lista spółek" not in text and "Zaloguj" not in text:
-                  print("class=", tag.get("class"), "| chars", len(text), "|", text[:250])
-          EOF
+   jobs:
+     check:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v5
+         - uses: actions/setup-python@v6
+           with:
+             python-version: "3.12"
+         - run: pip install -r requirements.txt
+         - run: python -m sources.pl_newconnect
+           env:
+             ENABLE_NEWCONNECT: "true"

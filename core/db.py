@@ -283,6 +283,29 @@ run_log = Table(
     Column("warnings", Text),
 )
 
+transactions = Table(
+    "transactions", metadata,               # portfolio buys and sells
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, nullable=False),
+    Column("market", String(8), nullable=False),
+    Column("ticker", String(16), nullable=False),
+    Column("kind", String(4), nullable=False),          # buy | sell
+    Column("tx_date", Date, nullable=False),
+    Column("shares", Float, nullable=False),
+    Column("price", Float, nullable=False),             # in the stock's own currency
+    Column("fees", Float, nullable=False, default=0),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+    Index("ix_tx_user", "user_id", "tx_date"),
+)
+
+targets = Table(
+    "targets", metadata,                    # rebalancing target weights
+    Column("user_id", Integer, primary_key=True),
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("pct", Float, nullable=False),
+)
+
 _engine: Engine | None = None
 _lock = threading.Lock()
 

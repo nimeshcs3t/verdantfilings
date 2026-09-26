@@ -146,6 +146,33 @@ def css() -> str:
 .stat-grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin:6px 0 12px; }}
 .stat {{ border:1px solid var(--rule); border-radius:8px; padding:10px 12px; }}
 .stat .k {{ color:var(--muted); font-size:.78rem; }} .stat .v {{ font-size:1.25rem; font-weight:600; color:var(--ink); }}
+.ret-grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(96px, 1fr)); gap:8px; margin:4px 0 14px; }}
+.ret {{ border:1px solid var(--rule); border-radius:8px; padding:8px 10px; }}
+.ret .lbl {{ color:var(--muted); font-size:.78rem; font-weight:600; }}
+.ret .p {{ font-size:1.08rem; font-weight:600; margin-top:2px; font-variant-numeric:tabular-nums; }}
+.ret .b {{ color:var(--muted); font-size:.75rem; margin-top:2px; font-variant-numeric:tabular-nums; }}
+.ret .p.up, .ret .b .up {{ color:var(--up); }} .ret .p.down, .ret .b .down {{ color:var(--down); }}
+.ret .note {{ color:var(--muted); font-size:.68rem; }}
+.perf {{ border:1px solid var(--rule); border-radius:8px; padding:10px 12px 8px; margin:4px 0 14px; }}
+.perf svg {{ width:100%; height:220px; display:block; }}
+.perf .port {{ stroke:var(--pine); stroke-width:2.2; vector-effect:non-scaling-stroke; }}
+.perf .bench {{ stroke:var(--muted); stroke-width:1.6; stroke-dasharray:5 4; vector-effect:non-scaling-stroke; }}
+.perf .grid {{ stroke:var(--rule); vector-effect:non-scaling-stroke; }}
+.perf .zero {{ stroke:var(--muted); stroke-width:1; opacity:.5; vector-effect:non-scaling-stroke; }}
+.perf text {{ font-size:10px; fill:var(--muted); }}
+.perf-legend {{ display:flex; gap:16px; flex-wrap:wrap; font-size:.85rem; color:var(--ink); margin-bottom:6px; align-items:center; }}
+.perf-range {{ margin-left:auto; color:var(--muted); font-size:.78rem; }}
+.sw {{ display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:6px; vertical-align:-1px; }}
+.sw.port {{ background:var(--pine); }} .sw.bench {{ background:var(--muted); }}
+.alloc-grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; margin:4px 0 14px; }}
+.alloc {{ border:1px solid var(--rule); border-radius:8px; padding:10px 12px; }}
+.alloc-title {{ font-weight:600; color:var(--ink); font-size:.92rem; margin-bottom:6px; }}
+.alloc-body {{ display:flex; gap:14px; align-items:center; }}
+.alloc-legend {{ flex:1; font-size:.84rem; color:var(--ink); min-width:0; }}
+.alloc-legend div {{ display:flex; align-items:center; padding:2px 0; }}
+.alloc-legend .nm {{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:8px; }}
+.alloc-legend b {{ font-weight:600; font-variant-numeric:tabular-nums; }}
+.tbl td.buy {{ color:var(--up); font-weight:600; }} .tbl td.sell {{ color:var(--down); font-weight:600; }}
 .empty {{ border:1px dashed var(--rule); padding:18px 20px; color:var(--muted); margin:8px 0 16px; border-radius:6px; }}
 .brand {{ font-size:2.2rem; font-weight:700; letter-spacing:-0.02em; color:var(--ink); margin:3rem 0 .3rem; }}
 @media (max-width:640px) {{

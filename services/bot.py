@@ -127,7 +127,7 @@ def handle(chat: str, text: str) -> str | None:
         _, err = watch.add(user, row["market"], row["ticker"])
         return esc(err) if err else f"Added {esc(row['name_en'])} ({esc(row['ticker'])}). Filings appear in the app shortly."
     if command == "/portfolio":
-        items = portfolio.list_holdings(user["id"])
+        items = portfolio.current_holdings(user["id"])
         if not items:
             return "No holdings yet. Add them on the app's Portfolio page."
         lines, totals = ["<b>Your portfolio</b>"], {}

@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, insert, select, update
 
-from core.db import get_engine, holdings, price_alerts, utcnow, watchlist
+from core.db import get_engine, holdings, price_alerts, targets, transactions, utcnow, watchlist
 from sources import get_source
 
 from . import prices
@@ -17,7 +17,85 @@ CURRENCY = {"KR": "KRW", "US": "USD", "AU": "AUD", "PL": "PLN", "JP": "JPY", "IL
 KINDS = {"move": "Daily move of at least", "above": "Price rises above", "below": "Price falls below"}
 
 
-# ---- holdings ---------------------------------------------------------------------------
+HOME_CURRENCIES = ["USD", "AUD", "KRW", "INR", "EUR", "GBP", "JPY", "PLN", "ILS", "SGD", "HKD", "CAD", "CHF", "CNY"]
+
+
+# ---- transactions -----------------------------------------------------------------------
+def list_transactions(user_id: int) -> list[dict]:
+    migrate_holdings(user_id)
+    with get_engine().connect() as conn:
+        return [dict(r) for r in conn.execute(select(transactions).where(transactions.c.user_id == user_id)
+                                              .order_by(transactions.c.tx_date.desc(), transactions.c.id.desc())).mappings()]
+
+
+def add_transaction(user_id: int, market: str, ticker: str, kind: str, tx_date, shares: float, price: float,
+                    fees: float = 0.0) -> str | None:
+    if kind not in ("buy", "sell") or shares <= 0 or price < 0 or fees < 0:
+        return "Enter a positive number of shares, and a price and fees of zero or more."
+    if kind == "sell":
+        from .portfolio_calc import positions
+        held = positions(list_transactions(user_id), until=tx_date).get((market, ticker), {}).get("shares", 0)
+        if shares > held + 1e-9:
+            return f"You held {held:,.4g} shares on that date, so you can't sell {shares:,.4g}."
+    with get_engine().begin() as conn:
+        conn.execute(insert(transactions).values(user_id=user_id, market=market, ticker=ticker, kind=kind, tx_date=tx_date,
+                                                 shares=shares, price=price, fees=fees, created_at=utcnow()))
+    return None
+
+
+def remove_transaction(user_id: int, tx_id: int) -> None:
+    with get_engine().begin() as conn:
+        conn.execute(delete(transactions).where(transactions.c.id == tx_id, transactions.c.user_id == user_id))
+
+
+def migrate_holdings(user_id: int) -> None:
+    """One-time: turn holdings saved before transactions existed into buys dated when they were added."""
+    with get_engine().connect() as conn:
+        old = [dict(r) for r in conn.execute(select(holdings).where(holdings.c.user_id == user_id)).mappings()]
+    if not old:
+        return
+    with get_engine().begin() as conn:
+        for h in old:
+            day = (h["created_at"] or utcnow()).date()
+            conn.execute(insert(transactions).values(user_id=user_id, market=h["market"], ticker=h["ticker"], kind="buy",
+                                                     tx_date=day, shares=h["shares"], price=h["avg_price"], fees=0,
+                                                     created_at=utcnow()))
+        conn.execute(delete(holdings).where(holdings.c.user_id == user_id))
+
+
+def current_holdings(user_id: int) -> list[dict]:
+    """Holdings derived from transactions: shares and average price per company."""
+    from .portfolio_calc import positions
+    return [{"market": m, "ticker": t, "shares": p["shares"], "avg_price": p["avg"]}
+            for (m, t), p in positions(list_transactions(user_id)).items() if p["shares"] > 1e-9]
+
+
+# ---- targets and currency ---------------------------------------------------------------
+def get_targets(user_id: int) -> dict[tuple[str, str], float]:
+    with get_engine().connect() as conn:
+        return {(r[0], r[1]): r[2] for r in conn.execute(select(targets.c.market, targets.c.ticker, targets.c.pct)
+                                                          .where(targets.c.user_id == user_id))}
+
+
+def save_targets(user_id: int, values: dict[tuple[str, str], float | None]) -> None:
+    with get_engine().begin() as conn:
+        conn.execute(delete(targets).where(targets.c.user_id == user_id))
+        for (m, t), pct in values.items():
+            if pct is not None and pct > 0:
+                conn.execute(insert(targets).values(user_id=user_id, market=m, ticker=t, pct=float(pct)))
+
+
+def home_currency(user_id: int) -> str:
+    from core.usage import get_state
+    return get_state(f"home_ccy:{user_id}", "USD") or "USD"
+
+
+def set_home_currency(user_id: int, currency: str) -> None:
+    from core.usage import set_state
+    set_state(f"home_ccy:{user_id}", currency if currency in HOME_CURRENCIES else "USD")
+
+
+# ---- holdings (kept for older data; new entries are transactions) -----------------------
 def list_holdings(user_id: int) -> list[dict]:
     with get_engine().connect() as conn:
         return [dict(r) for r in conn.execute(select(holdings).where(holdings.c.user_id == user_id)

@@ -14,9 +14,9 @@ SUFFIX = {"KR": [".KS", ".KQ"], "US": [""], "AU": [".AX"], "JP": [".T"], "PL": [
 STOOQ = {"US": ".us", "JP": ".jp", "PL": ""}
 
 
-def _yahoo(symbol: str) -> list[tuple[date, float]]:
+def _yahoo(symbol: str, years: int = 1) -> list[tuple[date, float]]:
     r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
-                     params={"range": "1y", "interval": "1d"}, headers=HEADERS, timeout=15)
+                     params={"range": f"{years}y", "interval": "1d"}, headers=HEADERS, timeout=20)
     if r.status_code != 200:
         return []
     result = ((r.json().get("chart") or {}).get("result") or [None])[0]
@@ -41,24 +41,57 @@ def _stooq(symbol: str) -> list[tuple[date, float]]:
             out.append((date.fromisoformat(row["Date"]), float(row["Close"])))
         except (KeyError, ValueError):
             continue
-    return out[-260:]
+    return out
 
 
-def history(market: str, ticker: str) -> list[tuple[date, float]]:
-    """About a year of daily closes, oldest first. Empty if no free source has the stock."""
+def history(market: str, ticker: str, years: int = 1) -> list[tuple[date, float]]:
+    """Daily closes, oldest first (about `years` years). Empty if no free source has the stock."""
     for suffix in SUFFIX.get(market, []):
         try:
-            data = _yahoo(f"{ticker}{suffix}")
+            data = _yahoo(f"{ticker}{suffix}", years)
             if len(data) > 5:
                 return data
         except Exception:
             continue
     if market in STOOQ:
         try:
-            return _stooq(f"{ticker.lower()}{STOOQ[market]}")
+            return _stooq(f"{ticker.lower()}{STOOQ[market]}")[-(260 * years):]
         except Exception:
             return []
     return []
+
+
+def symbol_history(symbol: str, years: int = 1) -> list[tuple[date, float]]:
+    """Any Yahoo symbol (benchmarks such as SPY or QQQ)."""
+    try:
+        data = _yahoo(symbol, years)
+        if len(data) > 5:
+            return data
+    except Exception:
+        pass
+    try:
+        return _stooq(f"{symbol.lower()}.us")[-(260 * years):]
+    except Exception:
+        return []
+
+
+def fx_history(currency: str, years: int = 1) -> list[tuple[date, float]]:
+    """US dollars per one unit of `currency`, daily. [] for USD (rate is 1)."""
+    currency = currency.upper()
+    if currency == "USD":
+        return []
+    for symbol, invert in ((f"{currency}USD=X", False), (f"{currency}=X", True)):
+        try:
+            data = _yahoo(symbol, years)
+        except Exception:
+            data = []
+        data = [(d, (1 / v if invert else v)) for d, v in data if v]
+        if len(data) > 5:
+            return data
+    try:
+        return _stooq(f"{currency.lower()}usd")[-(260 * years):]
+    except Exception:
+        return []
 
 
 def move_on(hist: list[tuple[date, float]], day: date) -> float | None:

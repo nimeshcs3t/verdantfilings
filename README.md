@@ -80,7 +80,9 @@ more companies, CSV export.
 - **Company insight:** an AI brief of recent filings (weekly, needs Gemini), upcoming dates announced in filings
   (meetings, record and payment dates, results), financial figures (Korea: DART key accounts, yearly; USA: SEC
   company facts, yearly and quarterly), and insider trades (USA: Form 4; Korea: DART executive reports).
-- **Portfolio:** holdings with value, gain or loss, day move and recent filings; totals per currency.
+- **Portfolio:** buys and sells with dates; time-weighted returns for Today, 1M, 3M, 6M, YTD, 1Y, 2Y, 3Y and All
+  compared with SPY or QQQ; a performance chart; allocation by company, country and currency; rebalancing to target
+  weights (with optional new cash); values in USD or a chosen home currency using daily exchange rates.
 - **Price alerts** by Telegram: daily move above a %, or price above/below a level (whole watchlist or one company).
 - **Telegram commands:** /list /today /add /remove /portfolio /price /help (answered at the next job run).
 - **Housekeeping:** daily clean-up (filings older than 2 years except starred, long texts after 180 days, expired

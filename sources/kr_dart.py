@@ -34,7 +34,10 @@ def tidy_english_name(name: str) -> str:
     for _ in range(2):
         name = _SUFFIX_RE.sub("", name).strip(" ,.")
     if name.isupper():
-        name = " ".join(w if len(w) <= 3 else w.capitalize() for w in name.split())
+        small = {"OF", "AND", "THE", "FOR", "IN", "ON", "AT", "TO", "DE", "LA"}
+        words = name.split()
+        name = " ".join((w.lower() if i else w.capitalize()) if w in small
+                        else (w if len(w) <= 3 else w.capitalize()) for i, w in enumerate(words))
     return name
 
 

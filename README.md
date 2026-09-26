@@ -64,6 +64,14 @@ Each user has a `plan` (`free` or `pro`). Plans already limit watchlist size (`F
 small webhook that sets `plan = 'pro'`. Other natural pro features: Telegram alerts, full-document translation,
 more companies, CSV export.
 
+## Australia (ASX)
+
+Reads the data service behind the ASX website: no key, English, with ASX's own "price sensitive" flag.
+It is unofficial (ASX sells the official ComNews feed) and could change or be blocked; ASX's website terms
+limit commercial reuse. Turn it on with `ENABLE_ASX = "true"` in GitHub Actions secrets and Streamlit
+secrets; set it to "false" to switch Australia off. Telegram alerts go out only for price-sensitive
+announcements unless `ASX_ALERTS = "all"`. Overviews are read from the announcement PDFs.
+
 ## USA (SEC EDGAR)
 
 Free, no key. Add `SEC_CONTACT_EMAIL` (a real address; the SEC requires it in every request) to GitHub

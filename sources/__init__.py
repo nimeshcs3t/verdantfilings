@@ -8,6 +8,7 @@ Candidates for later:
   TW  MOPS         https://mops.twse.com.tw
   IN  BSE/NSE      corporate announcements feeds
 """
+from .au_asx import AsxSource
 from .base import Company, Filing, FilingSource, SourceBusy
 from .il_tase import TaseSource
 from .jp_edinet import EdinetSource
@@ -35,5 +36,6 @@ def configured_sources() -> list[FilingSource]:
 
 register(DartSource())
 register(EdgarSource())
+register(AsxSource())
 register(TaseSource())
 register(EdinetSource())

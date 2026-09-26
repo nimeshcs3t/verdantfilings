@@ -57,7 +57,7 @@ def find_chat_for_code(code: str) -> str | None:
 def format_filing(row: dict) -> str:
     esc = lambda s: html.escape(str(s or ""), quote=False)
     lines = [f"<b>{esc(row['company_name'])}</b>  {esc(row['ticker'])}",
-             esc(row["title_en"])]
+             ("<b>Price sensitive</b>  " if row.get("price_sensitive") else "") + esc(row["title_en"])]
     if row.get("title_local") and row["title_local"] != row["title_en"]:
         lines.append(f"<i>{esc(row['title_local'])}</i>")
     if row.get("summary_en"):

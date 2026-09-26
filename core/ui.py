@@ -30,6 +30,7 @@ CSS = """
 .fl-title { font-size:1.03rem; color:var(--ink); margin-top:2px; line-height:1.4; }
 .fl-orig { color:var(--muted); font-size:.85rem; margin-top:2px; }
 .fl-tk + .fl-tk { margin-left:10px; }
+.fl-flag { display:inline-block; font-size:.72rem; font-weight:600; color:var(--amber); border:1px solid var(--amber); border-radius:3px; padding:0 5px; margin-left:8px; vertical-align:2px; }
 .fl-link a { color:var(--pine); text-decoration:none; font-size:.86rem; font-weight:500; white-space:nowrap; }
 .fl-link a:hover, .fl-link a:focus-visible { text-decoration:underline; }
 .fl-new { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--amber); margin-right:7px; vertical-align:2px; }
@@ -116,8 +117,9 @@ def filing_row_html(f: dict, show_company: bool = True, is_new: bool = False, co
     orig = ""
     if f.get("title_local") and f["title_local"] != f.get("title_en"):
         orig = f'<div class="fl-orig ko">{esc(f["title_local"])}</div>'
+    flag = '<span class="fl-flag">Price sensitive</span>' if f.get("price_sensitive") else ""
     return (f'<div class="fl-row"><div class="fl-date">{short_date(f["filed_date"])}</div>'
-            f'<div>{company}<div class="fl-title"{title_style}>{title_dot}{esc(f["title_en"])}</div>{orig}</div>'
+            f'<div>{company}<div class="fl-title"{title_style}>{title_dot}{esc(f["title_en"])}{flag}</div>{orig}</div>'
             f'<div class="fl-link"><a href="{esc(f["url"])}" target="_blank" rel="noopener noreferrer">Original</a></div></div>')
 
 

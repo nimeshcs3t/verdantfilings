@@ -127,6 +127,12 @@ api_usage = Table(
     Column("last_call", DateTime(timezone=True)),
 )
 
+filing_flags = Table(
+    "filing_flags", metadata,         # extra per-filing markers, e.g. ASX price-sensitive
+    Column("uid", String(64), primary_key=True),
+    Column("price_sensitive", Boolean, nullable=False, default=False),
+)
+
 _engine: Engine | None = None
 _lock = threading.Lock()
 

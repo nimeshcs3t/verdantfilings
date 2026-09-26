@@ -31,6 +31,7 @@ class Filing:
     filer: str
     url: str
     title_en: str = ""      # set when the source already provides a good English title
+    price_sensitive: bool = False   # exchange-marked market-moving announcement (ASX)
 
 
 class FilingSource(ABC):
@@ -72,3 +73,7 @@ class FilingSource(ABC):
 
     def external_links(self, company: Company) -> list[tuple[str, str]]:
         return []
+
+    def should_alert(self, row: dict) -> bool:
+        """Whether a new filing is worth a Telegram alert. Sources can narrow this."""
+        return True

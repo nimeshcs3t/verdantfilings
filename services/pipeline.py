@@ -14,8 +14,8 @@ from sqlalchemy import and_, delete, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from core.config import direct_fetch, get_secret
-from core.db import (as_utc, companies, enrich_queue, filings, get_engine, listed_companies, users, utcnow,
-                     watchlist)
+from core.db import (as_utc, companies, enrich_queue, filing_flags, filings, get_engine, listed_companies, users,
+                     utcnow, watchlist)
 from sources import Company, SourceBusy, configured_sources, get_source
 
 from . import telegram
@@ -144,6 +144,8 @@ def sync_company(market: str, ticker: str, force: bool = False) -> int:
         try:
             with get_engine().begin() as conn:
                 conn.execute(insert(filings).values(**row))
+                if f.price_sensitive:
+                    conn.execute(insert(filing_flags).values(uid=f.uid, price_sensitive=True))
             new += 1
         except IntegrityError:
             pass
@@ -226,14 +228,25 @@ def process_overviews(limit: int = MAX_OVERVIEWS_PER_RUN) -> int:
     return done
 
 
+def price_sensitive_uids(uids: list[str]) -> set[str]:
+    if not uids:
+        return set()
+    with get_engine().connect() as conn:
+        return set(conn.execute(select(filing_flags.c.uid).where(
+            filing_flags.c.uid.in_(uids), filing_flags.c.price_sensitive == True)).scalars())  # noqa: E712
+
+
 def filings_for(pairs: list[tuple[str, str]], since: date, limit: int = 300) -> list[dict]:
     if not pairs:
         return []
     cond = or_(*[and_(filings.c.market == m, filings.c.ticker == t) for m, t in pairs])
     with get_engine().connect() as conn:
-        rows = conn.execute(select(filings).where(cond, filings.c.filed_date >= since)
-                            .order_by(filings.c.filed_date.desc(), filings.c.uid.desc()).limit(limit)).mappings().all()
-    return [dict(r) for r in rows]
+        rows = [dict(r) for r in conn.execute(select(filings).where(cond, filings.c.filed_date >= since)
+                .order_by(filings.c.filed_date.desc(), filings.c.uid.desc()).limit(limit)).mappings().all()]
+    flagged = price_sensitive_uids([r["uid"] for r in rows])
+    for r in rows:
+        r["price_sensitive"] = r["uid"] in flagged
+    return rows
 
 
 def watched_pairs() -> list[tuple[str, str]]:
@@ -258,7 +271,8 @@ def notify_pending() -> int:
     for row in pending:
         src = get_source(row["market"])
         recent = src is not None and row["filed_date"] >= src.today() - timedelta(days=1)
-        if recent and telegram.enabled():
+        row["price_sensitive"] = row["uid"] in price_sensitive_uids([row["uid"]])
+        if recent and telegram.enabled() and src.should_alert(row):
             if not row["summary_en"] and direct_fetch():
                 row = enrich_filing(row["uid"]) or row
             with get_engine().connect() as conn:

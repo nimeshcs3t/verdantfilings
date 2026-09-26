@@ -11,6 +11,7 @@ showSidebarNavigation = false
 
 [server]
 enableXsrfProtection = true
+fileWatcherType = "none"
 
 [browser]
 gatherUsageStats = false

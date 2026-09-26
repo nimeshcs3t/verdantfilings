@@ -74,6 +74,11 @@ class FilingSource(ABC):
     def external_links(self, company: Company) -> list[tuple[str, str]]:
         return []
 
+    def market_feed(self) -> list[dict]:
+        """Latest filings across the whole market, for keyword alerts. Items: uid, ticker or source_id,
+        company, title_local, title_en, url, date. Sources without a cheap market-wide feed return []."""
+        return []
+
     def should_alert(self, row: dict) -> bool:
         """Whether a new filing is worth a Telegram alert. Sources can narrow this."""
         return True

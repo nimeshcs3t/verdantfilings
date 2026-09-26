@@ -64,6 +64,24 @@ Each user has a `plan` (`free` or `pro`). Plans already limit watchlist size (`F
 small webhook that sets `plan = 'pro'`. Other natural pro features: Telegram alerts, full-document translation,
 more companies, CSV export.
 
+## Features
+
+- **Today:** a day-in-brief row of category counts, category filters, a by-time or by-company view, and the share
+  price move on each filing day.
+- **Categories** assigned automatically from titles: Earnings, Dividend, Buyback, Insider trade, Stake change,
+  Capital raise, M&A, Contract, Report, Meeting, Board, Legal.
+- **Company page:** a price chart with filing dates marked, private notes, and category filters.
+- **Watchlist:** letter logos, 30-day sparklines, and alerts per company (All filings, Major only, Off).
+- **Search** across all stored filings, starred filings, and CSV export.
+- **Ask about a filing** (needs GEMINI_API_KEY or ANTHROPIC_API_KEY).
+- **Alerts:** instant or a daily digest at your time; skip insider trades; a weekly report on Mondays; keyword alerts
+  matched market-wide for Korea, USA, Poland and Japan (keywords translated into each market's language).
+- **Remember me** for 30 days (a random token in a browser cookie; only its hash is stored).
+- **Dark mode** following the device setting, or chosen in the ⋮ menu, then Settings.
+
+Share prices come from free sources (Yahoo Finance chart data, then Stooq) and may be delayed or unavailable for
+some markets.
+
 ## Translation
 
 Titles and filing text are translated with Google Translate first. Google often refuses requests from shared

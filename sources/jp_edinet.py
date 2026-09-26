@@ -217,6 +217,20 @@ class EdinetSource(FilingSource):
             day += timedelta(days=1)
         return out
 
+    def market_feed(self) -> list[dict]:
+        out = []
+        for day in (self.today() - timedelta(days=1), self.today()):
+            for item in self._documents(day):
+                sec = str(item.get("secCode") or "")
+                if not sec or str(item.get("withdrawalStatus", "0")) != "0" or not item.get("docID"):
+                    continue
+                out.append({"uid": f"JP:{item['docID']}", "ticker": sec[:-1] if len(sec) == 5 else sec,
+                            "company": item.get("filerName") or "",
+                            "title_local": (item.get("docDescription") or "").strip(),
+                            "title_en": DOC_TYPES.get(str(item.get("docTypeCode") or ""), ""),
+                            "url": VIEWER.format(item["docID"]), "date": day})
+        return out
+
     def fetch_document_text(self, uid: str) -> str:
         """Text of the filing's main documents (the HTML inside the XBRL package)."""
         doc_id = uid.split(":", 1)[1]

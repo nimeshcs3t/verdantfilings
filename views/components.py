@@ -1,6 +1,7 @@
 """Widgets shared by several pages."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 import streamlit as st
@@ -9,19 +10,41 @@ from core import nav
 from core.db import as_utc, utcnow
 from core.ui import esc, filing_row_html, html_block, news_html, summary_html
 from core.config import direct_fetch
-from services import github, news, watch
-from services.pipeline import enrich_filing, get_company, is_queued, search_companies
+from services import ask, github, news, personal, prices, watch
+from services.classify import categorize
+from services.pipeline import enrich_filing, get_company, is_queued, listings_ready, search_companies
 from sources import configured_sources, get_source
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def price_history(market: str, ticker: str) -> list:
+    try:
+        return prices.history(market, ticker)
+    except Exception:
+        return []
+
+
+def histories(pairs: list[tuple[str, str]]) -> dict[tuple[str, str], list]:
+    """Price histories for several companies at once (in parallel, cached for an hour)."""
+    pairs = list(dict.fromkeys(pairs))[:40]
+    if not pairs:
+        return {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return dict(zip(pairs, pool.map(lambda p: price_history(*p), pairs)))
+
+
 def render_filing(f: dict, key: str, show_company: bool = True, link_company: bool = True,
-                  country: str = "") -> None:
+                  country: str = "", hist: list | None = None, stars: set | None = None) -> None:
     created = as_utc(f.get("created_at"))
     is_new = bool(created and utcnow() - created < timedelta(hours=2))
-    html_block(filing_row_html(f, show_company, is_new, country))
+    category = categorize(f.get("title_en"), f.get("title_local"), f.get("price_sensitive"))
+    move = prices.move_html(prices.move_on(hist, f["filed_date"])) if hist else ""
+    is_starred = bool(stars and f["uid"] in stars)
+    html_block(filing_row_html(f, show_company, is_new, country, category, move, is_starred))
     with st.expander("Overview and translation"):
         if f.get("summary_en"):
             _show_enriched(f)
+            _ask_box(f, key)
         elif not direct_fetch() and is_queued(f["uid"]):
             st.caption("The overview is being prepared. It usually takes a few minutes; reload the page then.")
         elif st.button("Translate and summarize", key=f"enrich-{key}-{f['uid']}"):
@@ -36,9 +59,31 @@ def render_filing(f: dict, key: str, show_company: bool = True, link_company: bo
                 st.warning((enriched or {}).get("enrich_error", "This filing couldn't be processed."))
         else:
             st.caption("Translates the filing to English and writes a short overview.")
+        user = st.session_state.get("user")
+        cols = st.columns([1, 1, 3])
+        if user and cols[0].button("Unstar" if is_starred else "Star", key=f"star-{key}-{f['uid']}", type="tertiary",
+                                   icon=":material/star:" if is_starred else ":material/star_border:"):
+            personal.toggle_star(user["id"], f["uid"])
+            st.rerun()
         if show_company and link_company:
-            if st.button("Company page", key=f"co-{key}-{f['uid']}", type="tertiary"):
+            if cols[1].button("Company page", key=f"co-{key}-{f['uid']}", type="tertiary"):
                 nav.open_company(f["market"], f["ticker"])
+
+
+def _ask_box(f: dict, key: str) -> None:
+    if not ask.available():
+        return
+    with st.form(f"ask-{key}-{f['uid']}", border=False, clear_on_submit=False):
+        cols = st.columns([5, 1], vertical_alignment="bottom")
+        question = cols[0].text_input("Ask about this filing", placeholder="e.g. What is the deal size?",
+                                      key=f"q-{key}-{f['uid']}")
+        asked = cols[1].form_submit_button("Ask", width="stretch")
+    store = f"answer-{key}-{f['uid']}"
+    if asked and question.strip():
+        with st.spinner("Reading the filing"):
+            st.session_state[store] = ask.answer(question, f)
+    if st.session_state.get(store):
+        html_block(f'<div class="answer">{esc(st.session_state[store])}</div>')
 
 
 def _show_enriched(f: dict) -> None:
@@ -81,7 +126,10 @@ def add_company_form(user: dict, key: str = "add") -> None:
                     found = []
                 st.session_state[f"matches-{key}"] = [(c.market, c.ticker, c.name_en, c.name_local) for c in found]
             if not st.session_state[f"matches-{key}"]:
-                st.warning(f"No listed company matches “{query.strip()}”.")
+                if not direct_fetch() and not listings_ready(market):
+                    st.warning("The company list is still loading. Try again in a few minutes.")
+                else:
+                    st.warning(f"No listed company matches “{query.strip()}”.")
     matches = st.session_state.get(f"matches-{key}") or []
     if matches:
         st.caption("Choose a company")

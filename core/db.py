@@ -133,6 +133,65 @@ filing_flags = Table(
     Column("price_sensitive", Boolean, nullable=False, default=False),
 )
 
+stars = Table(
+    "stars", metadata,
+    Column("user_id", Integer, primary_key=True),
+    Column("uid", String(64), primary_key=True),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+)
+
+notes = Table(
+    "notes", metadata,
+    Column("user_id", Integer, primary_key=True),
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("body", Text),
+    Column("updated_at", DateTime(timezone=True), default=utcnow),
+)
+
+user_prefs = Table(
+    "user_prefs", metadata,
+    Column("user_id", Integer, primary_key=True),
+    Column("alert_mode", String(16), nullable=False, default="instant"),   # instant | digest
+    Column("digest_hour", Integer, nullable=False, default=18),
+    Column("tz", String(40), nullable=False, default="UTC"),
+    Column("skip_insider", Boolean, nullable=False, default=False),
+    Column("weekly", Boolean, nullable=False, default=True),
+    Column("last_digest", String(10)),
+    Column("last_weekly", String(10)),
+)
+
+watch_prefs = Table(
+    "watch_prefs", metadata,                # per-company alert level: all | major
+    Column("user_id", Integer, primary_key=True),
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("level", String(8), nullable=False, default="all"),
+)
+
+keywords = Table(
+    "keywords", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, nullable=False),
+    Column("market", String(8), nullable=False, default="*"),
+    Column("keyword", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+)
+
+keyword_hits = Table(
+    "keyword_hits", metadata,
+    Column("user_id", Integer, primary_key=True),
+    Column("uid", String(64), primary_key=True),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+)
+
+sessions = Table(
+    "sessions", metadata,                   # "remember me" tokens, stored hashed
+    Column("token_hash", String(64), primary_key=True),
+    Column("user_id", Integer, nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+)
+
 _engine: Engine | None = None
 _lock = threading.Lock()
 

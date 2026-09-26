@@ -4,8 +4,13 @@ import streamlit as st
 
 from core.auth import change_password, update_user
 from core.session import logout
-from core.ui import page_header
-from services import telegram
+from core.ui import esc, html_block, page_header
+from services import personal, telegram
+from sources import configured_sources
+
+TIMEZONES = ["UTC", "Asia/Seoul", "Asia/Tokyo", "Asia/Kolkata", "Asia/Singapore", "Asia/Hong_Kong", "Asia/Dubai",
+             "Asia/Jerusalem", "Australia/Sydney", "Europe/London", "Europe/Warsaw", "Europe/Paris",
+             "America/New_York", "America/Chicago", "America/Los_Angeles"]
 
 
 def page() -> None:
@@ -45,6 +50,13 @@ def page() -> None:
                 else:
                     st.warning("No Start message found yet. Press Start in the bot chat, then try again.")
 
+    alert_settings(user)
+    keyword_settings(user)
+
+    st.subheader("Appearance", divider=False)
+    st.caption("Dark mode follows your phone or computer setting. To choose yourself, open the ⋮ menu at the top "
+               "right of the app, then Settings, then pick Light or Dark.")
+
     st.subheader("Change password", divider=False)
     with st.form("pw", clear_on_submit=True):
         old = st.text_input("Current password", type="password", autocomplete="current-password")
@@ -55,9 +67,62 @@ def page() -> None:
                 st.error("The new passwords don't match.")
             else:
                 err = change_password(user["id"], old, new)
-                st.error(err) if err else st.success("Password changed.")
+                if err:
+                    st.error(err)
+                else:
+                    personal.end_all_sessions(user["id"])
+                    st.success("Password changed. Other devices have been signed out.")
 
     st.divider()
-    if st.button("Sign out"):
+    c1, c2, _ = st.columns([1, 1.4, 2])
+    if c1.button("Sign out", width="stretch"):
         logout()
         st.rerun()
+    if c2.button("Sign out on all devices", width="stretch"):
+        personal.end_all_sessions(user["id"])
+        logout()
+        st.rerun()
+
+
+def alert_settings(user: dict) -> None:
+    st.subheader("Alerts", divider=False)
+    prefs = personal.get_prefs(user["id"])
+    with st.form("alert-prefs", border=False):
+        mode = st.radio("How to receive filing alerts", ["Instant", "Daily digest"], horizontal=True,
+                        index=0 if prefs["alert_mode"] == "instant" else 1,
+                        help="Instant sends each filing as it arrives. Daily digest sends one message a day.")
+        c1, c2 = st.columns(2)
+        hour = c1.selectbox("Digest time", list(range(24)), index=int(prefs["digest_hour"]),
+                            format_func=lambda h: f"{h:02d}:00")
+        tz = c2.selectbox("Your timezone", TIMEZONES,
+                          index=TIMEZONES.index(prefs["tz"]) if prefs["tz"] in TIMEZONES else 0)
+        skip = st.checkbox("Skip insider-trade alerts (Form 4, director dealings)", value=bool(prefs["skip_insider"]))
+        weekly = st.checkbox("Send a weekly report on Monday at the digest time", value=bool(prefs["weekly"]))
+        if st.form_submit_button("Save alert settings", type="primary"):
+            personal.save_prefs(user["id"], alert_mode="instant" if mode == "Instant" else "digest",
+                                digest_hour=hour, tz=tz, skip_insider=skip, weekly=weekly)
+            st.success("Saved.")
+    st.caption("Per-company choices (All filings, Major only, Off) are on the Watchlist page.")
+
+
+def keyword_settings(user: dict) -> None:
+    st.subheader("Keyword alerts", divider=False)
+    st.caption("Get a Telegram message when any filing title contains a word, even from companies you don't follow "
+               "(Korea, USA, Poland and Japan are checked market-wide). Write keywords in English; they're matched "
+               "in each market's language too.")
+    markets = {"All countries": "*", **{s.country: s.market for s in configured_sources()}}
+    with st.form("add-keyword", clear_on_submit=True, border=False):
+        c1, c2, c3 = st.columns([2, 1.2, 0.8], vertical_alignment="bottom")
+        word = c1.text_input("Keyword", placeholder="e.g. buyback, acquisition, rights offering")
+        where = c2.selectbox("Country", list(markets))
+        if c3.form_submit_button("Add", width="stretch"):
+            err = personal.add_keyword(user["id"], word, markets[where])
+            st.warning(err) if err else st.rerun()
+    names = {v: k for k, v in markets.items()}
+    for kw in personal.list_keywords(user["id"]):
+        c1, c2 = st.columns([4, 1], vertical_alignment="center")
+        c1.markdown(f'<span class="chip c-buyback" style="margin-left:0">{esc(kw["keyword"])}</span>'
+                    f'<span class="fl-tk">{esc(names.get(kw["market"], kw["market"]))}</span>', unsafe_allow_html=True)
+        if c2.button("Remove", key=f"kw-{kw['id']}", type="tertiary"):
+            personal.remove_keyword(user["id"], kw["id"])
+            st.rerun()

@@ -168,6 +168,23 @@ class DartSource(FilingSource):
             page += 1
         return out
 
+    def market_feed(self) -> list[dict]:
+        today, out = self.today(), []
+        for page in (1, 2):
+            data = self._json("list.json", bgn_de=today.strftime("%Y%m%d"), end_de=today.strftime("%Y%m%d"),
+                              page_no=page, page_count=100)
+            if data.get("status") != "000":
+                break
+            for it in data.get("list", []):
+                stock = (it.get("stock_code") or "").strip()
+                if stock:
+                    out.append({"uid": f"KR:{it['rcept_no']}", "ticker": stock, "company": it.get("corp_name", ""),
+                                "title_local": re.sub(r"\s+", " ", it.get("report_nm", "")).strip(), "title_en": "",
+                                "url": VIEWER.format(it["rcept_no"]), "date": today})
+            if page >= int(data.get("total_page", 1)):
+                break
+        return out
+
     def fetch_document_text(self, uid: str) -> str:
         rcept_no = uid.split(":", 1)[1]
         zf = self._zip("document.xml", rcept_no=rcept_no)

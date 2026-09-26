@@ -24,6 +24,8 @@ from .kr_dart import tidy_english_name
 TICKERS = "https://www.sec.gov/files/company_tickers_exchange.json"
 SUBMISSIONS = "https://data.sec.gov/submissions/CIK{:010d}.json"
 ARCHIVE = "https://www.sec.gov/Archives/edgar/data/{}/{}"
+CURRENT_FEED = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=&company=&dateb=&owner=include"
+                "&start={}&count=100&output=atom")
 PAUSE = 0.15            # stays under the SEC's 10 requests/second
 MAX_DOC_BYTES = 4_000_000
 
@@ -242,6 +244,31 @@ class EdgarSource(FilingSource):
             out.append(Filing(uid=f"US:{cik}:{acc}", market=self.market, ticker=company.ticker,
                               company_name=company.name_en, filed_date=filed, title_local=title,
                               filer=company.name_en, url=url, title_en=title))
+        return out
+
+    def market_feed(self) -> list[dict]:
+        import feedparser
+        excluded = {f.strip().upper() for f in str(get_secret("SEC_EXCLUDE_FORMS", DEFAULT_EXCLUDE)).split(",") if f.strip()}
+        by_cik = {c.source_id: c.ticker for c in self.all_listed()}
+        out, seen = [], set()
+        for start in (0, 100):
+            feed = feedparser.parse(self._get(CURRENT_FEED.format(start)).content)
+            for e in feed.entries:
+                m = re.match(r"^(?P<form>.+?) - (?P<name>.+) \((?P<cik>\d{10})\) \((?P<role>[^)]+)\)$", e.get("title", ""))
+                acc = re.search(r"AccNo:</b>\s*([\d-]+)", e.get("summary", ""))
+                if not m or not acc or m["role"] == "Reporting" or m["form"].upper() in excluded:
+                    continue
+                cik = str(int(m["cik"]))
+                uid = f"US:{cik}:{acc.group(1)}"
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                items = ",".join(re.findall(r"Item (\d\.\d\d)", e.get("summary", "")))
+                title = self._title(m["form"], items)
+                filed = re.search(r"Filed:</b>\s*(\d{4}-\d{2}-\d{2})", e.get("summary", ""))
+                out.append({"uid": uid, "ticker": by_cik.get(cik, ""), "company": tidy_english_name(m["name"]),
+                            "title_local": title, "title_en": title, "url": e.get("link", ""),
+                            "date": date.fromisoformat(filed.group(1)) if filed else self.today()})
         return out
 
     def fetch_document_text(self, uid: str) -> str:

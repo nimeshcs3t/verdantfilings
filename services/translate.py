@@ -258,3 +258,46 @@ def glossary_or_cached(title: str, src: str) -> str | None:
     if english:
         _cache_put(_cache_key(title, src), english)
     return english
+
+
+def translate_keyword(word: str, lang: str) -> str | None:
+    """An English search keyword in another language (e.g. "buyback" -> "자기주식"), cached."""
+    global _google_paused_until
+    if not word or lang in ("en", "auto", "", None):
+        return None
+    key = _cache_key(word.lower(), f"to-{lang}")
+    cached = _cache_get(key)
+    if cached:
+        return cached
+    out = None
+    if time.time() >= _google_paused_until:
+        try:
+            out = GoogleTranslator(source="en", target=lang).translate(word)
+        except Exception as exc:
+            if "toomanyrequests" in type(exc).__name__.lower() or "too many requests" in str(exc).lower():
+                _google_paused_until = time.time() + 1800
+    if not out:
+        from .summarize import _anthropic, _gemini
+        language = LANG_NAMES.get(lang, lang)
+        prompt = (f"Give the {language} word or short phrase that companies use in stock-exchange filing titles for "
+                  f"this English term: \"{word}\". Reply with only the {language} term.")
+        for provider in (_gemini, _anthropic):
+            try:
+                out = provider(prompt)
+                if out:
+                    break
+            except Exception:
+                continue
+    if not out:
+        try:
+            data = requests.get("https://api.mymemory.translated.net/get", timeout=20,
+                                params={"q": word, "langpair": f"en|{MYMEMORY_CODES.get(lang, lang)}"}).json()
+            if data.get("responseStatus") in (200, "200"):
+                out = (data.get("responseData") or {}).get("translatedText")
+        except Exception:
+            out = None
+    out = (out or "").strip().strip('"').splitlines()[0].strip() if out else ""
+    if out and out.lower() != word.lower():
+        _cache_put(key, out)
+        return out
+    return None

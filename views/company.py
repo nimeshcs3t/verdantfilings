@@ -2,13 +2,14 @@ from datetime import timedelta
 
 import streamlit as st
 
-from core.ui import esc, html_block, page_header, relative_time
+from core.ui import esc, html_block, logo_html, page_header, relative_time
 from core.config import direct_fetch
-from services import chat, github, watch
+from services import chat, github, personal, prices, watch
+from services.classify import ORDER, categorize, label as cat_label
 from services.pipeline import filings_for, get_company, search_companies, sync_company
 from sources import Company, configured_sources, get_source
 
-from .components import cached_english_news, cached_local_news, render_filing, render_news
+from .components import cached_english_news, cached_local_news, price_history, render_filing, render_news
 
 
 def _selection(wl: list[dict]):
@@ -68,9 +69,12 @@ def page() -> None:
     elif not comp.get("last_synced"):
         github.trigger_sync()
 
+    hist = price_history(market, comp["ticker"])
     local = comp["name_local"] if comp["name_local"] != comp["name_en"] else ""
     meta = "".join(f"<span>{esc(x)}</span>" for x in (local, comp["ticker"], f"{src.country}, {src.regulator}") if x)
-    html_block(f'<h1 class="co-name">{esc(comp["name_en"])}</h1><div class="co-meta ko">{meta}</div>')
+    last = (f'<span>{hist[-1][1]:,.2f} {prices.move_html(prices.last_move(hist))}</span>' if hist else "")
+    html_block(f'<div class="co-head">{logo_html(comp["name_en"], comp["ticker"], large=True)}'
+               f'<h1 class="co-name">{esc(comp["name_en"])}</h1></div><div class="co-meta ko">{meta}{last}</div>')
 
     watching = watch.is_watching(user["id"], market, comp["ticker"])
     b1, b2, *_ = st.columns([1.1, 1.1, 3])
@@ -89,28 +93,52 @@ def page() -> None:
     for label, url in src.external_links(company_obj)[:1]:
         b2.link_button(label, url, width="stretch")
 
+    rows = filings_for([(market, comp["ticker"])], src.today() - timedelta(days=180), limit=300)
+    for r in rows:
+        r["category"] = categorize(r["title_en"], r["title_local"], r.get("price_sensitive"))
+    chart = prices.chart_svg(hist, [r["filed_date"] for r in rows])
+    if chart:
+        html_block(chart)
+
+    with st.expander("My notes on this company", icon=":material/edit_note:"):
+        note = personal.get_note(user["id"], market, comp["ticker"])
+        with st.form(f"note-{market}-{comp['ticker']}", border=False):
+            body = st.text_area("Private notes", value=note, height=140, label_visibility="collapsed",
+                                placeholder="Only you can see these notes.")
+            if st.form_submit_button("Save notes"):
+                personal.save_note(user["id"], market, comp["ticker"], body)
+                st.toast("Notes saved")
+
     tab_filings, tab_news, tab_chat = st.tabs(["Filings", "News", "Discussion"])
 
     with tab_filings:
-        rows = filings_for([(market, comp["ticker"])], src.today() - timedelta(days=90), limit=200)
-        text = st.text_input("Filter", placeholder="Filter by title, e.g. dividend", label_visibility="collapsed",
+        present = [k for k in ORDER if any(r["category"] == k for r in rows)]
+        c1, c2 = st.columns([1, 1.4], vertical_alignment="center")
+        text = c1.text_input("Filter", placeholder="Filter by title, e.g. dividend", label_visibility="collapsed",
                              key="co-filter")
+        picked = c2.pills("Categories", [cat_label(k) for k in present], selection_mode="multi",
+                          key="co-cats", label_visibility="collapsed") if len(present) > 1 else []
         if text.strip():
             q = text.strip().lower()
             rows = [r for r in rows if q in (r["title_en"] or "").lower() or q in (r["title_local"] or "").lower()]
+        if picked:
+            rows = [r for r in rows if cat_label(r["category"]) in picked]
         if not comp.get("last_synced") and not direct_fetch():
             st.caption("This company's filings are being loaded for the first time. They'll appear within a few minutes.")
         else:
-            st.caption(f"{len(rows)} filings in the last 90 days")
+            st.caption(f"{len(rows)} filings in the last 180 days")
+        stars = personal.starred(user["id"])
         for r in rows:
-            render_filing(r, key="co", show_company=False)
+            render_filing(r, key="co", show_company=False, hist=hist, stars=stars)
         if src.attribution and rows:
             st.caption(src.attribution)
 
     with tab_news:
-        press = st.segmented_control("Press", ["English press", "Korean press, translated"],
-                                     default="English press", key="co-press", label_visibility="collapsed")
-        if press == "Korean press, translated":
+        local_label = f"{src.country} press, translated"
+        options = ["English press"] + ([local_label] if src.news_local else [])
+        press = st.segmented_control("Press", options, default="English press", key="co-press",
+                                     label_visibility="collapsed") if len(options) > 1 else "English press"
+        if press == local_label:
             with st.spinner("Translating headlines"):
                 render_news(cached_local_news(market, comp["name_local"]))
         else:

@@ -267,36 +267,8 @@ def tracked_pairs() -> list[tuple[str, str]]:
 
 # ---- alerts ------------------------------------------------------------------------------
 def notify_pending() -> int:
-    """Send Telegram alerts for filings from the last day that haven't been announced yet."""
-    with get_engine().connect() as conn:
-        pending = [dict(r) for r in conn.execute(
-            select(filings).where(filings.c.notified == False).order_by(filings.c.uid)).mappings()]  # noqa: E712
-    sent = 0
-    channel = get_secret("TELEGRAM_CHANNEL_ID")
-    for row in pending:
-        src = get_source(row["market"])
-        recent = src is not None and row["filed_date"] >= src.today() - timedelta(days=1)
-        row["price_sensitive"] = row["uid"] in price_sensitive_uids([row["uid"]])
-        if recent and telegram.enabled() and src.should_alert(row):
-            if not row["summary_en"] and direct_fetch():
-                row = enrich_filing(row["uid"]) or row
-            with get_engine().connect() as conn:
-                chats = set(conn.execute(
-                    select(users.c.telegram_chat_id).select_from(
-                        users.join(watchlist, users.c.id == watchlist.c.user_id))
-                    .where(watchlist.c.market == row["market"], watchlist.c.ticker == row["ticker"],
-                           watchlist.c.notify == True, users.c.is_active == True,  # noqa: E712
-                           users.c.telegram_chat_id.is_not(None))).scalars())
-            if channel:
-                chats.add(channel)
-            message = telegram.format_filing(row)
-            for chat in chats:
-                if telegram.send_message(chat, message):
-                    sent += 1
-                time.sleep(0.05)
-        with get_engine().begin() as conn:
-            conn.execute(update(filings).where(filings.c.uid == row["uid"]).values(notified=True))
-    return sent
+    from .alerts import notify_pending as instant
+    return instant()
 
 
 def retranslate_titles(limit: int = 200) -> int:
@@ -343,5 +315,6 @@ def run_once() -> dict:
     except Exception as exc:
         log.warning("retranslation failed: %s", exc)
     stats["summaries"] = process_overviews()
-    stats["alerts"] = notify_pending()
+    from .alerts import run_alerts
+    stats.update(run_alerts())
     return stats

@@ -2,7 +2,7 @@ import streamlit as st
 
 from core.auth import authenticate, create_user, invite_ok, signup_mode
 from core.config import app_name
-from core.session import login
+from core.session import login, remember
 from core.ui import esc, html_block
 
 
@@ -18,12 +18,15 @@ def page() -> None:
             with st.form("signin"):
                 username = st.text_input("Username", autocomplete="username")
                 password = st.text_input("Password", type="password", autocomplete="current-password")
+                keep = st.checkbox("Keep me signed in on this device for 30 days")
                 if st.form_submit_button("Sign in", type="primary", width="stretch"):
                     user, err = authenticate(username, password)
                     if err:
                         st.error(err)
                     else:
                         login(user)
+                        if keep:
+                            remember(user["id"])
                         st.rerun()
 
         if mode != "closed":

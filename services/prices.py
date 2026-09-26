@@ -1,0 +1,124 @@
+"""Daily share prices from free sources (Yahoo Finance chart data, then Stooq). Used for the price move on
+each filing, sparklines and company charts. Prices are indicative and may be delayed."""
+from __future__ import annotations
+
+import csv
+import io
+from datetime import date, datetime, timedelta, timezone
+
+import requests
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                         "Chrome/140.0.0.0 Safari/537.36"}
+SUFFIX = {"KR": [".KS", ".KQ"], "US": [""], "AU": [".AX"], "JP": [".T"], "PL": [".WA"], "IL": [".TA"]}
+STOOQ = {"US": ".us", "JP": ".jp", "PL": ""}
+
+
+def _yahoo(symbol: str) -> list[tuple[date, float]]:
+    r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                     params={"range": "1y", "interval": "1d"}, headers=HEADERS, timeout=15)
+    if r.status_code != 200:
+        return []
+    result = ((r.json().get("chart") or {}).get("result") or [None])[0]
+    if not result:
+        return []
+    offset = int((result.get("meta") or {}).get("gmtoffset") or 0)
+    closes = (((result.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or []
+    out = []
+    for ts, close in zip(result.get("timestamp") or [], closes):
+        if close is not None:
+            out.append((datetime.fromtimestamp(ts + offset, tz=timezone.utc).date(), float(close)))
+    return out
+
+
+def _stooq(symbol: str) -> list[tuple[date, float]]:
+    r = requests.get("https://stooq.com/q/d/l/", params={"s": symbol, "i": "d"}, headers=HEADERS, timeout=15)
+    if r.status_code != 200 or not r.text.startswith("Date"):
+        return []
+    out = []
+    for row in csv.DictReader(io.StringIO(r.text)):
+        try:
+            out.append((date.fromisoformat(row["Date"]), float(row["Close"])))
+        except (KeyError, ValueError):
+            continue
+    return out[-260:]
+
+
+def history(market: str, ticker: str) -> list[tuple[date, float]]:
+    """About a year of daily closes, oldest first. Empty if no free source has the stock."""
+    for suffix in SUFFIX.get(market, []):
+        try:
+            data = _yahoo(f"{ticker}{suffix}")
+            if len(data) > 5:
+                return data
+        except Exception:
+            continue
+    if market in STOOQ:
+        try:
+            return _stooq(f"{ticker.lower()}{STOOQ[market]}")
+        except Exception:
+            return []
+    return []
+
+
+def move_on(hist: list[tuple[date, float]], day: date) -> float | None:
+    """Price change on the filing day (or the next trading day), versus the previous close."""
+    for i, (d, close) in enumerate(hist):
+        if d >= day and i > 0:
+            prev = hist[i - 1][1]
+            return (close / prev - 1) if prev else None
+    return None
+
+
+def last_move(hist: list[tuple[date, float]]) -> float | None:
+    return (hist[-1][1] / hist[-2][1] - 1) if len(hist) >= 2 and hist[-2][1] else None
+
+
+def move_html(move: float | None) -> str:
+    if move is None:
+        return ""
+    cls = "up" if move > 0.0005 else "down" if move < -0.0005 else "flat"
+    arrow = "▲" if cls == "up" else "▼" if cls == "down" else "■"
+    return f'<span class="mv {cls}" title="Share price change that day">{arrow} {abs(move) * 100:.1f}%</span>'
+
+
+def sparkline_svg(hist: list[tuple[date, float]], days: int = 30, width: int = 96, height: int = 26) -> str:
+    pts = [c for _, c in hist[-days:]]
+    if len(pts) < 3:
+        return ""
+    lo, hi = min(pts), max(pts)
+    span = (hi - lo) or 1
+    xy = " ".join(f"{i * (width - 2) / (len(pts) - 1) + 1:.1f},{height - 2 - (p - lo) / span * (height - 4):.1f}"
+                  for i, p in enumerate(pts))
+    cls = "up" if pts[-1] >= pts[0] else "down"
+    return (f'<svg class="spark {cls}" width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+            f'aria-label="30-day price trend"><polyline fill="none" stroke-width="1.6" points="{xy}"/></svg>')
+
+
+def chart_svg(hist: list[tuple[date, float]], markers: list[date], days: int = 120) -> str:
+    """Responsive price chart with a dot on each filing date."""
+    data = hist[-days:]
+    if len(data) < 5:
+        return ""
+    w, h, pad = 720, 180, 8
+    closes = [c for _, c in data]
+    lo, hi = min(closes), max(closes)
+    span = (hi - lo) or 1
+    x = lambda i: pad + i * (w - 2 * pad) / (len(data) - 1)
+    y = lambda c: h - pad - (c - lo) / span * (h - 2 * pad)
+    line = " ".join(f"{x(i):.1f},{y(c):.1f}" for i, (_, c) in enumerate(data))
+    area = f"{x(0):.1f},{h - pad} {line} {x(len(data) - 1):.1f},{h - pad}"
+    dots = []
+    marked = set(markers)
+    for i, (d, c) in enumerate(data):
+        if d in marked or (i + 1 < len(data) and any(d < m < data[i + 1][0] for m in marked)):
+            dots.append(f'<circle cx="{x(i):.1f}" cy="{y(c):.1f}" r="3.5"><title>Filing on {d:%d %b}</title></circle>')
+    first, last = data[0], data[-1]
+    change = last[1] / first[1] - 1 if first[1] else 0
+    return (f'<div class="chart"><div class="chart-head"><span>{len(data)} trading days</span>'
+            f'<span class="mv {"up" if change >= 0 else "down"}">{change * 100:+.1f}%</span>'
+            f'<span class="chart-last">Last close {last[1]:,.2f} on {last[0]:%d %b}</span></div>'
+            f'<svg viewBox="0 0 {w} {h}" preserveAspectRatio="none" role="img" aria-label="Share price chart">'
+            f'<polygon class="area" points="{area}"/><polyline class="line" fill="none" points="{line}"/>'
+            f'<g class="dots">{"".join(dots)}</g></svg>'
+            f'<div class="chart-foot">Dots mark filing dates. Prices from free sources, may be delayed.</div></div>')

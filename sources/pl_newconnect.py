@@ -306,6 +306,17 @@ class NewConnectSource(FilingSource):
                               title_en=TYPE_EN.get(r["kind"], "") and f"{TYPE_EN[r['kind']]} ({label})"))
         return out
 
+    def market_feed(self) -> list[dict]:
+        out = []
+        for r in self._reports_since(self.today() - timedelta(days=1)):
+            label = f"{r['system']} {r['number']}".strip()
+            title = r["title"] or r["kind"]
+            out.append({"uid": f"PL:{r['gid']}", "source_id": r["isin"], "company": r["company"],
+                        "title_local": f"{title} ({label})" if label else title,
+                        "title_en": f"{TYPE_EN[r['kind']]} ({label})" if TYPE_EN.get(r["kind"]) else "",
+                        "url": REPORT.format(r["gid"]), "date": r["date"]})
+        return out
+
     def fetch_document_text(self, uid: str) -> str:
         gid = uid.split(":", 1)[1]
         soup = BeautifulSoup(self._call("GET", REPORT.format(gid)).text, "html.parser")

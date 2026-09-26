@@ -26,6 +26,8 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           SEC_CONTACT_EMAIL: ${{ secrets.SEC_CONTACT_EMAIL }}
+          ENABLE_ASX: ${{ secrets.ENABLE_ASX }}
+          ASX_ALERTS: ${{ secrets.ASX_ALERTS }}
           TASE_API_KEY: ${{ secrets.TASE_API_KEY }}
           TASE_MAYA_PATH: ${{ secrets.TASE_MAYA_PATH }}
           TASE_DAILY_CALL_LIMIT: ${{ secrets.TASE_DAILY_CALL_LIMIT }}

@@ -103,6 +103,22 @@ login_attempts = Table(
     Index("ix_login_attempts", "username", "ts"),
 )
 
+listed_companies = Table(
+    "listed_companies", metadata,     # full exchange listing, refreshed daily by the worker
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("source_id", String(32)),
+    Column("name_local", String(200)),
+    Column("name_en", String(200)),
+    Column("updated_at", DateTime(timezone=True), default=utcnow),
+)
+
+enrich_queue = Table(
+    "enrich_queue", metadata,         # filings a member asked to translate; the worker processes them
+    Column("uid", String(64), primary_key=True),
+    Column("requested_at", DateTime(timezone=True), default=utcnow),
+)
+
 _engine: Engine | None = None
 _lock = threading.Lock()
 
@@ -112,7 +128,7 @@ def get_engine() -> Engine:
     if _engine is None:
         with _lock:
             if _engine is None:
-                url = get_secret("DATABASE_URL") or "sqlite:///filings.db"
+                url = str(get_secret("DATABASE_URL") or "sqlite:///filings.db").strip().strip('"').strip("'").strip()
                 if url.startswith("postgres://"):
                     url = "postgresql://" + url[len("postgres://"):]
                 kwargs = {"pool_pre_ping": True}

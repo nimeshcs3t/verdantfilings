@@ -7,14 +7,16 @@ from sqlalchemy.exc import IntegrityError
 from core.db import companies, get_engine, utcnow, watchlist
 from core.plans import watchlist_limit
 
-from .pipeline import get_company
+from core.config import direct_fetch
+
+from .pipeline import get_company, listings_ready
 
 
 def get_watchlist(user_id: int) -> list[dict]:
     j = watchlist.join(companies, (watchlist.c.market == companies.c.market) & (watchlist.c.ticker == companies.c.ticker))
     with get_engine().connect() as conn:
         rows = conn.execute(select(watchlist.c.market, watchlist.c.ticker, watchlist.c.notify,
-                                   companies.c.name_en, companies.c.name_local)
+                                   companies.c.name_en, companies.c.name_local, companies.c.last_synced)
                             .select_from(j).where(watchlist.c.user_id == user_id)
                             .order_by(companies.c.name_en)).mappings().all()
     return [dict(r) for r in rows]
@@ -35,6 +37,8 @@ def add(user: dict, market: str, ticker: str) -> tuple[dict | None, str | None]:
         return None, f"Your plan allows {limit} companies. Remove one to add another."
     comp = get_company(market, ticker)
     if comp is None:
+        if not direct_fetch() and not listings_ready(market):
+            return None, "The company list is still loading. Try again in a few minutes."
         return None, f"No listed company found for {ticker}."
     try:
         with get_engine().begin() as conn:

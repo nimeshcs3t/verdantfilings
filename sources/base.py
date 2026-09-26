@@ -58,5 +58,9 @@ class FilingSource(ABC):
     @abstractmethod
     def fetch_document_text(self, uid: str) -> str: ...
 
+    def all_listed(self) -> list[Company]:
+        """Every listed company, for lookups without calling the regulator."""
+        return []
+
     def external_links(self, company: Company) -> list[tuple[str, str]]:
         return []

@@ -1,11 +1,17 @@
-"""Background job: sync every watched company and send Telegram alerts.
+"""Background job: refresh company listings, sync filings, write overviews and send Telegram alerts.
 Run by GitHub Actions on a schedule (see .github/workflows/poll.yml), or manually: python worker.py
 """
 import logging
+import os
 
-from services.pipeline import run_once
+os.environ.setdefault("DIRECT_FETCH", "true")
+
+from services.pipeline import run_once  # noqa: E402
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     stats = run_once()
-    logging.info("checked %(companies)s companies, %(new)s new filings, %(alerts)s alerts, %(errors)s errors", stats)
+    logging.info("listings %(listed)s, companies %(companies)s, new filings %(new)s, overviews %(summaries)s, "
+                 "alerts %(alerts)s, errors %(errors)s", stats)
+    if stats["errors"] and not stats["companies"]:
+        raise SystemExit(1)

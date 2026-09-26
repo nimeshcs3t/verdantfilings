@@ -31,6 +31,9 @@ Everything here runs on free tiers.
 
 ## How it works
 
+The website never contacts regulators directly: DART blocks the cloud servers Streamlit runs on.
+The GitHub job (`worker.py`) does all regulator work and writes to the database; the website reads it.
+
 - **Today page** checks DART for each company on your watchlist (at most once every 10 minutes per company)
   and lists today's filings with English titles. Common DART titles use a hand-checked glossary; the rest are
   machine translated and cached.

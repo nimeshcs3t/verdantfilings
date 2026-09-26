@@ -2,7 +2,9 @@ from datetime import timedelta
 
 import streamlit as st
 
-from core.ui import html_block, long_date, page_header
+from core.config import direct_fetch
+from core.db import as_utc
+from core.ui import html_block, long_date, page_header, relative_time
 from services import watch
 from services.pipeline import filings_for, sync_company
 from sources import get_source
@@ -23,13 +25,15 @@ def page() -> None:
         add_company_form(user, key="today-empty")
         return
 
-    errors = []
-    with st.spinner("Checking regulators for new filings"):
-        for w in wl:
-            try:
-                sync_company(w["market"], w["ticker"])
-            except Exception:
-                errors.append(w["name_en"])
+    errors, waiting = [], [w["name_en"] for w in wl if not w.get("last_synced")]
+    if direct_fetch():
+        with st.spinner("Checking regulators for new filings"):
+            for w in wl:
+                try:
+                    sync_company(w["market"], w["ticker"])
+                except Exception:
+                    errors.append(w["name_en"])
+    synced = [as_utc(w["last_synced"]) for w in wl if w.get("last_synced")]
 
     period = st.session_state.get("today-period") or "Today"
     since = today - timedelta(days=PERIODS[period])
@@ -50,6 +54,10 @@ def page() -> None:
                              label_visibility="collapsed")
         if errors:
             st.caption("Couldn't reach the regulator for: " + ", ".join(errors) + ". Showing saved filings.")
+        if synced:
+            st.caption(f"Last checked {relative_time(min(synced))}. New filings are picked up every 10 minutes.")
+        if waiting:
+            st.caption("Loading filings for " + ", ".join(waiting) + ". They'll appear within a few minutes.")
         if not rows:
             html_block('<div class="empty">Nothing filed in this period. Filings usually arrive during '
                        'Korean business hours, 8am to 7pm KST. Try a longer period above.</div>')

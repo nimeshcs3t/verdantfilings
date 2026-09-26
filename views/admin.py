@@ -5,6 +5,8 @@ from sqlalchemy import func, select
 from core.auth import create_user, update_user
 from core.db import companies, filings, get_engine, messages, users, watchlist
 from core.ui import page_header
+from core.config import direct_fetch
+from services import github
 from services.pipeline import run_once
 
 
@@ -58,10 +60,19 @@ def page() -> None:
             st.error(err) if err else st.success(f"Added {username.lower()}.")
 
     st.subheader("Sync", divider=False)
-    st.caption("The background worker does this every 10 minutes. Run it now to check every watched company "
-               "and send pending Telegram alerts.")
-    if st.button("Sync all companies now"):
-        with st.spinner("Syncing"):
-            stats = run_once()
-        st.success(f"Checked {stats['companies']} companies, found {stats['new']} new filings, "
-                   f"sent {stats['alerts']} alerts. {stats['errors']} errors.")
+    st.caption("The GitHub job checks every company every 10 minutes during Korean market hours and hourly "
+               "otherwise, writes overviews and sends Telegram alerts.")
+    if direct_fetch():
+        if st.button("Sync all companies now"):
+            with st.spinner("Syncing"):
+                stats = run_once()
+            st.success(f"Checked {stats['companies']} companies, found {stats['new']} new filings, "
+                       f"sent {stats['alerts']} alerts. {stats['errors']} errors.")
+    elif github.configured():
+        if st.button("Run the sync job now"):
+            ok = github.trigger_sync()
+            (st.success if ok else st.error)("Started. Results appear in a minute or two." if ok else
+                                             "GitHub didn't accept the request. Check GH_TOKEN and GH_REPO.")
+    else:
+        st.caption("To run it now, open your GitHub repo, then Actions, Poll filings, Run workflow. "
+                   "Add GH_TOKEN and GH_REPO to the app secrets to get a button here instead.")

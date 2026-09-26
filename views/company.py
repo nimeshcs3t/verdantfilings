@@ -3,8 +3,9 @@ from datetime import timedelta
 import streamlit as st
 
 from core.ui import esc, html_block, page_header, relative_time
-from services import chat, watch
-from services.pipeline import filings_for, get_company, sync_company
+from core.config import direct_fetch
+from services import chat, github, watch
+from services.pipeline import filings_for, get_company, search_companies, sync_company
 from sources import Company, configured_sources, get_source
 
 from .components import cached_english_news, cached_local_news, render_filing, render_news
@@ -56,11 +57,14 @@ def page() -> None:
         return
     st.query_params.update({"m": market, "t": comp["ticker"]})
 
-    try:
-        with st.spinner("Checking for new filings"):
-            sync_company(market, comp["ticker"])
-    except Exception:
-        st.caption("The regulator didn't respond. Showing saved filings.")
+    if direct_fetch():
+        try:
+            with st.spinner("Checking for new filings"):
+                sync_company(market, comp["ticker"])
+        except Exception:
+            st.caption("The regulator didn't respond. Showing saved filings.")
+    elif not comp.get("last_synced"):
+        github.trigger_sync()
 
     meta = "".join(f"<span>{esc(x)}</span>" for x in (comp["name_local"], comp["ticker"], f"{src.country}, {src.regulator}"))
     html_block(f'<h1 class="co-name">{esc(comp["name_en"])}</h1><div class="co-meta ko">{meta}</div>')
@@ -91,7 +95,10 @@ def page() -> None:
         if text.strip():
             q = text.strip().lower()
             rows = [r for r in rows if q in (r["title_en"] or "").lower() or q in (r["title_local"] or "").lower()]
-        st.caption(f"{len(rows)} filings in the last 90 days")
+        if not comp.get("last_synced") and not direct_fetch():
+            st.caption("This company's filings are being loaded for the first time. They'll appear within a few minutes.")
+        else:
+            st.caption(f"{len(rows)} filings in the last 90 days")
         for r in rows:
             render_filing(r, key="co", show_company=False)
 
@@ -111,13 +118,8 @@ def page() -> None:
 def _search_results(query: str) -> None:
     results = []
     for src in configured_sources():
-        ticker = src.normalize_ticker(query)
         try:
-            if ticker:
-                c = src.resolve(ticker)
-                results += [c] if c else []
-            else:
-                results += src.search(query)
+            results += search_companies(src.market, query)
         except Exception:
             st.caption(f"{src.regulator} search is unavailable right now.")
     if not results:

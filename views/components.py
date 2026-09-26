@@ -8,8 +8,9 @@ import streamlit as st
 from core import nav
 from core.db import as_utc, utcnow
 from core.ui import esc, filing_row_html, html_block, news_html, summary_html
-from services import news, watch
-from services.pipeline import enrich_filing
+from core.config import direct_fetch
+from services import github, news, watch
+from services.pipeline import enrich_filing, is_queued, search_companies
 from sources import configured_sources, get_source
 
 
@@ -20,15 +21,20 @@ def render_filing(f: dict, key: str, show_company: bool = True, link_company: bo
     with st.expander("Overview and translation"):
         if f.get("summary_en"):
             _show_enriched(f)
+        elif not direct_fetch() and is_queued(f["uid"]):
+            st.caption("The overview is being prepared. It usually takes a few minutes; reload the page then.")
         elif st.button("Translate and summarize", key=f"enrich-{key}-{f['uid']}"):
             with st.spinner("Reading the filing"):
                 enriched = enrich_filing(f["uid"])
-            if enriched and enriched.get("summary_en"):
+            if enriched and enriched.get("enrich_pending"):
+                github.trigger_sync()
+                st.success("Requested. The overview will be ready in a few minutes; reload the page then.")
+            elif enriched and enriched.get("summary_en"):
                 _show_enriched(enriched)
             else:
                 st.warning((enriched or {}).get("enrich_error", "This filing couldn't be processed."))
         else:
-            st.caption("Downloads the filing, translates it to English and writes a short overview.")
+            st.caption("Translates the filing to English and writes a short overview.")
         if show_company and link_company:
             if st.button("Company page", key=f"co-{key}-{f['uid']}", type="tertiary"):
                 nav.open_company(f["market"], f["ticker"])
@@ -64,8 +70,11 @@ def add_company_form(user: dict, key: str = "add") -> None:
             _add(user, market, ticker)
         else:
             with st.spinner("Searching"):
-                st.session_state[f"matches-{key}"] = [(c.market, c.ticker, c.name_en, c.name_local)
-                                                      for c in src.search(query)]
+                try:
+                    found = search_companies(market, query)
+                except Exception:
+                    found = []
+                st.session_state[f"matches-{key}"] = [(c.market, c.ticker, c.name_en, c.name_local) for c in found]
             if not st.session_state[f"matches-{key}"]:
                 st.warning(f"No listed company matches “{query.strip()}”.")
     matches = st.session_state.get(f"matches-{key}") or []
@@ -79,11 +88,18 @@ def add_company_form(user: dict, key: str = "add") -> None:
 
 def _add(user: dict, market: str, ticker: str) -> None:
     with st.spinner("Adding company"):
-        comp, err = watch.add(user, market, ticker)
+        try:
+            comp, err = watch.add(user, market, ticker)
+        except Exception:
+            comp, err = None, "The company couldn't be added right now. Try again in a few minutes."
     if err:
         st.warning(err)
     else:
-        st.toast(f"Added {comp['name_en']}")
+        if not direct_fetch() and not comp.get("last_synced"):
+            github.trigger_sync()
+            st.toast(f"Added {comp['name_en']}. Its filings will appear within a few minutes.")
+        else:
+            st.toast(f"Added {comp['name_en']}")
         st.rerun()
 
 

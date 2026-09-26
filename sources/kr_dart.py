@@ -131,6 +131,10 @@ class DartSource(FilingSource):
         return [Company(self.market, s, i["corp_code"], i["name_local"], tidy_english_name(i["name_en"]) or i["name_local"])
                 for _, _, s, i in hits[:limit]]
 
+    def all_listed(self) -> list[Company]:
+        return [Company(self.market, s, i["corp_code"], i["name_local"],
+                        tidy_english_name(i["name_en"]) or i["name_local"]) for s, i in self._corps().items()]
+
     def external_links(self, company: Company) -> list[tuple[str, str]]:
         return [("Naver Finance", f"https://finance.naver.com/item/main.naver?code={company.ticker}")]
 

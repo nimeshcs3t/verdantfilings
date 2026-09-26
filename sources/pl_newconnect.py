@@ -45,7 +45,7 @@ def tidy_polish_name(name: str) -> str:
         name = PL_SUFFIX.sub("", name).strip(" ,")
     if name.isupper():
         cap = lambda w: "-".join(p.capitalize() for p in w.split("-"))
-        name = " ".join(w if len(w) <= 3 else cap(w) for w in name.split())
+        name = " ".join(w if len(w) <= 3 or "." in w else cap(w) for w in name.split())
     return name
 
 
@@ -260,10 +260,15 @@ class NewConnectSource(FilingSource):
             tr.replace_with("\n" + " | ".join(c for c in cells if c) + "\n")
         lines = [re.sub(r"\s+", " ", ln).strip() for ln in body.get_text("\n").splitlines()]
         text = "\n".join(ln for ln in lines if ln and ln != "|")
-        # Many reports carry the company's own English version; prefer it when present.
-        english = re.search(r"MESSAGE \(ENGLISH VERSION\)(.*?)(INFORMACJE O PODMIOCIE|PODPISY OSÓB|$)", text, re.S)
-        if english and len(english.group(1).strip()) > 80:
-            return english.group(1).strip()
+        # Many reports carry the company's own English version; prefer it when present. The heading also
+        # appears in the table of contents, so use its last occurrence (the section itself).
+        marks = [m.end() for m in re.finditer(r"MESSAGE \(ENGLISH VERSION\)", text)]
+        if marks:
+            rest = text[marks[-1]:]
+            stop = re.search(r"INFORMACJE O PODMIOCIE|PODPISY OSÓB|\n\d+\.\s*[A-ZŁŚŻŹĆŃÓĘĄ ]{8,}\n", rest)
+            english = (rest[:stop.start()] if stop else rest).strip()
+            if len(english) > 80:
+                return english
         return text
 
 

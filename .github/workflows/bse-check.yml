@@ -1,0 +1,69 @@
+name: BSE check
+
+on: workflow_dispatch
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Test BSE
+        run: |
+          python - <<'EOF'
+          import datetime as dt
+          import requests
+
+          H = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+               "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.5",
+               "Origin": "https://www.bseindia.com/", "Referer": "https://www.bseindia.com/"}
+          API = "https://api.bseindia.com/BseIndiaAPI/api"
+          end = dt.date.today()
+          start = end - dt.timedelta(days=4)
+          results = {}
+
+          print("1) Announcements feed")
+          rows = []
+          try:
+              r = requests.get(f"{API}/AnnSubCategoryGetData/w", headers=H, timeout=30, params={
+                  "pageno": 1, "strCat": "-1", "subcategory": "-1", "strPrevDate": start.strftime("%Y%m%d"),
+                  "strToDate": end.strftime("%Y%m%d"), "strSearch": "P", "strscrip": "", "strType": "C"})
+              print("   status", r.status_code, r.headers.get("content-type"))
+              data = r.json()
+              rows = data.get("Table") or []
+              total = (data.get("Table1") or [{}])[0].get("ROWCNT")
+              print("   announcements in last 4 days:", total)
+              for row in rows[:3]:
+                  print("   -", row.get("SLONGNAME"), "|", (row.get("HEADLINE") or row.get("NEWSSUB") or "")[:90])
+              results["announcements"] = bool(rows)
+          except Exception as e:
+              print("   FAILED:", type(e).__name__, str(e)[:200])
+              results["announcements"] = False
+
+          print("2) PDF attachment")
+          try:
+              name = next(row["ATTACHMENTNAME"] for row in rows if row.get("ATTACHMENTNAME"))
+              r = requests.get(f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{name}", headers=H, timeout=30)
+              print("   status", r.status_code, r.headers.get("content-type"), len(r.content), "bytes")
+              results["pdf"] = r.status_code == 200 and r.content[:4] == b"%PDF"
+          except Exception as e:
+              print("   FAILED:", type(e).__name__, str(e)[:200])
+              results["pdf"] = False
+
+          print("3) Company list")
+          try:
+              r = requests.get(f"{API}/ListofScripData/w", headers=H, timeout=60, params={
+                  "scripcode": "", "Group": "", "industry": "", "segment": "Equity", "status": "Active"})
+              print("   status", r.status_code)
+              companies = r.json()
+              print("   active equity companies:", len(companies))
+              results["companies"] = len(companies) > 1000
+          except Exception as e:
+              print("   FAILED:", type(e).__name__, str(e)[:200])
+              results["companies"] = False
+
+          print()
+          print("RESULT:", "ALL PASSED" if all(results.values()) else "SOME FAILED", results)
+          EOF

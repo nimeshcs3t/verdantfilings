@@ -306,6 +306,15 @@ targets = Table(
     Column("pct", Float, nullable=False),
 )
 
+custom_symbols = Table(
+    "custom_symbols", metadata,             # portfolio holdings from any market, by Yahoo Finance symbol
+    Column("symbol", String(16), primary_key=True),
+    Column("name", String(200)),
+    Column("currency", String(8)),          # normalised, e.g. GBP (prices quoted in pence are divided by 100)
+    Column("scale", Float, nullable=False, default=1.0),
+    Column("country", String(40)),
+)
+
 _engine: Engine | None = None
 _lock = threading.Lock()
 

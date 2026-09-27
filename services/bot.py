@@ -132,7 +132,7 @@ def handle(chat: str, text: str) -> str | None:
             return "No holdings yet. Add them on the app's Portfolio page."
         lines, totals = ["<b>Your portfolio</b>"], {}
         for h in items:
-            v = portfolio.value(h, prices.history(h["market"], h["ticker"]))
+            v = portfolio.value(h, portfolio.price_history(h["market"], h["ticker"]))
             if v["value"] is None:
                 lines.append(f"{esc(h['ticker'])}: no price")
                 continue

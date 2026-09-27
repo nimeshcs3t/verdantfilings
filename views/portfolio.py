@@ -17,9 +17,21 @@ BENCHMARKS = {"S&P 500 (SPY)": "SPY", "Nasdaq 100 (QQQ)": "QQQ", "No benchmark":
 CHART_PERIODS = ["1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "All"]
 
 
+OTHER_LABEL = "Other (any Yahoo Finance symbol)"
+MASK = "•••••"
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def long_history(market: str, ticker: str) -> list:
-    return prices.history(market, ticker, YEARS)
+    return portfolio.price_history(market, ticker, YEARS)
+
+
+def _hidden() -> bool:
+    return bool(st.session_state.get("pf-hide"))
+
+
+def _shares(v: float) -> str:
+    return MASK if _hidden() else f"{v:,.4g}"
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -40,9 +52,11 @@ def _cls(v) -> str:
     return "" if v is None else ("up" if v > 0.00005 else "down" if v < -0.00005 else "")
 
 
-def _money(v, cur: str, signed: bool = False) -> str:
+def _money(v, cur: str, signed: bool = False, always: bool = False) -> str:
     if v is None:
         return "–"
+    if _hidden() and not always:
+        return f"{MASK} {cur}"
     digits = 0 if cur in ("KRW", "JPY") or abs(v) >= 1000 else 2
     return f"{v:+,.{digits}f} {cur}" if signed else f"{v:,.{digits}f} {cur}"
 
@@ -50,7 +64,7 @@ def _money(v, cur: str, signed: bool = False) -> str:
 def build(txs: list[dict], base: str, bench_symbol: str | None) -> dict:
     """Everything the page shows, in the base currency."""
     pairs = sorted({(t["market"], t["ticker"]) for t in txs})
-    currency_of = {p: portfolio.CURRENCY.get(p[0], "USD") for p in pairs}
+    currency_of = {p: portfolio.currency_for(*p) for p in pairs}
     with ThreadPoolExecutor(max_workers=8) as pool:
         hist = dict(zip(pairs, pool.map(lambda p: long_history(*p), pairs)))
     currencies = (set(currency_of.values()) | ({base} if base != "USD" else set())) - {"USD"}
@@ -92,11 +106,16 @@ def build(txs: list[dict], base: str, bench_symbol: str | None) -> dict:
             continue
         h = hist.get(key) or []
         last = h[-1][1] if h else None
-        comp = get_company(*key, resolve=False) or {}
-        src = get_source(key[0])
+        if key[0] == portfolio.OTHER:
+            info = portfolio.symbol_info(key[1]) or {}
+            name, country = info.get("name") or key[1], info.get("country") or "Other"
+        else:
+            comp = get_company(*key, resolve=False) or {}
+            src = get_source(key[0])
+            name, country = comp.get("name_en") or key[1], src.country if src else key[0]
         price_base = convert(last, key, today) if last is not None else None
-        rows.append({"market": key[0], "ticker": key[1], "name": comp.get("name_en") or key[1],
-                     "country": src.country if src else key[0], "currency": currency_of[key],
+        rows.append({"market": key[0], "ticker": key[1], "name": name,
+                     "country": country, "currency": currency_of[key],
                      "shares": p["shares"], "avg": p["avg"], "last": last, "day": prices.last_move(h) if h else None,
                      "price_base": price_base, "value_base": p["shares"] * price_base if price_base is not None else None,
                      "cost_base": p["cost_base"], "realized_base": p["realized_base"]})
@@ -121,8 +140,13 @@ def page() -> None:
     txs = portfolio.list_transactions(uid)
     home = portfolio.home_currency(uid)
 
-    c1, c2, c3 = st.columns([1.2, 1, 1.3], vertical_alignment="bottom")
+    if "pf-hide" not in st.session_state:
+        st.session_state["pf-hide"] = portfolio.hide_amounts(uid)
+    c1, c2, c3, c4 = st.columns([1.2, 1, 1.3, 0.9], vertical_alignment="bottom")
     mode = c1.segmented_control("Show values in", ["USD", "Home currency"], default="USD", key="pf-mode") or "USD"
+    hide = c4.toggle("Hide amounts", key="pf-hide", help="Hides money values and share counts; percentages stay visible.")
+    if hide != portfolio.hide_amounts(uid):
+        portfolio.set_hide_amounts(uid, hide)
     chosen = c2.selectbox("Home currency", portfolio.HOME_CURRENCIES,
                           index=portfolio.HOME_CURRENCIES.index(home) if home in portfolio.HOME_CURRENCIES else 0)
     if chosen != home:
@@ -163,28 +187,6 @@ def page() -> None:
 
 
 def overview(model: dict, base: str, bench_symbol: str | None) -> None:
-    total, cost, realized = model["total"], model["cost"], model["realized"]
-    gain = total - cost + realized
-    stats = [("Value", _money(total, base), ""),
-             ("Total gain", _money(gain, base, True), f'{_pct(gain / cost if cost else None)} on {_money(cost, base)} invested'),
-             ("Today", _money(model["today_change"], base, True) if model["today_change"] is not None else "–",
-              _pct(model["returns"][0]["portfolio"]) if model["returns"] else ""),
-             ("Realised gains", _money(realized, base, True), "from sales")]
-    html_block('<div class="stat-grid">' + "".join(
-        f'<div class="stat"><div class="k">{k}</div><div class="v">{esc(v)}</div><div class="k">{esc(sub)}</div></div>'
-        for k, v, sub in stats) + "</div>")
-
-    tiles = []
-    for r in model["returns"]:
-        b = (f'<div class="b">{esc(bench_symbol)} <span class="{_cls(r["benchmark"])}">{_pct(r["benchmark"])}</span></div>'
-             if bench_symbol and r["benchmark"] is not None else "")
-        note = '<div class="note">since first buy</div>' if r["partial"] else ""
-        tiles.append(f'<div class="ret"><div class="lbl">{r["label"]}</div>'
-                     f'<div class="p {_cls(r["portfolio"])}">{_pct(r["portfolio"])}</div>{b}{note}</div>')
-    html_block('<div class="ret-grid">' + "".join(tiles) + "</div>")
-    st.caption("Time-weighted returns in " + base + ", so adding or withdrawing money doesn't distort them. "
-               + (f"{bench_symbol} is price return in the same currency." if bench_symbol else ""))
-
     period = st.segmented_control("Chart period", CHART_PERIODS, default="1Y", key="pf-period",
                                   label_visibility="collapsed") or "1Y"
     index = model["index"]
@@ -199,6 +201,28 @@ def overview(model: dict, base: str, bench_symbol: str | None) -> None:
     else:
         st.caption("Not enough history for this period yet.")
 
+    tiles = []
+    for r in model["returns"]:
+        b = (f'<div class="b">{esc(bench_symbol)} <span class="{_cls(r["benchmark"])}">{_pct(r["benchmark"])}</span></div>'
+             if bench_symbol and r["benchmark"] is not None else "")
+        note = '<div class="note">since first buy</div>' if r["partial"] else ""
+        tiles.append(f'<div class="ret"><div class="lbl">{r["label"]}</div>'
+                     f'<div class="p {_cls(r["portfolio"])}">{_pct(r["portfolio"])}</div>{b}{note}</div>')
+    html_block('<div class="ret-grid">' + "".join(tiles) + "</div>")
+    st.caption("Time-weighted returns in " + base + ", so adding or withdrawing money doesn't distort them. "
+               + (f"{bench_symbol} is price return in the same currency." if bench_symbol else ""))
+
+    total, cost, realized = model["total"], model["cost"], model["realized"]
+    gain = total - cost + realized
+    stats = [("Value", _money(total, base), ""),
+             ("Total gain", _money(gain, base, True), f'{_pct(gain / cost if cost else None)} on {_money(cost, base)} invested'),
+             ("Today", _money(model["today_change"], base, True) if model["today_change"] is not None else "–",
+              _pct(model["returns"][0]["portfolio"]) if model["returns"] else ""),
+             ("Realised gains", _money(realized, base, True), "from sales")]
+    html_block('<div class="stat-grid">' + "".join(
+        f'<div class="stat"><div class="k">{k}</div><div class="v">{esc(v)}</div><div class="k">{esc(sub)}</div></div>'
+        for k, v, sub in stats) + "</div>")
+
     rows = model["rows"]
     html_block('<div class="alloc-grid">' + donut_svg("By company", allocation(rows, "name"))
                + donut_svg("By country", allocation(rows, "country"))
@@ -209,11 +233,11 @@ def holdings_table(model: dict, base: str, uid: int) -> None:
     lines = []
     for r in model["rows"]:
         src = get_source(r["market"])
-        recent = len(filings_for([(r["market"], r["ticker"])], src.today() - timedelta(days=7))) if src else 0
+        recent = len(filings_for([(r["market"], r["ticker"])], src.today() - timedelta(days=7))) if src else ""
         lines.append(
             f'<tr><td>{logo_html(r["name"], r["ticker"])}{esc(r["name"])} <span class="fl-tk">{esc(r["ticker"])}</span></td>'
-            f'<td class="num">{r["shares"]:,.4g}</td><td class="num">{_money(r["avg"], r["currency"])}</td>'
-            f'<td class="num">{_money(r["last"], r["currency"])}</td><td class="num">{_money(r["value_base"], base)}</td>'
+            f'<td class="num">{_shares(r["shares"])}</td><td class="num">{_money(r["avg"], r["currency"], always=True)}</td>'
+            f'<td class="num">{_money(r["last"], r["currency"], always=True)}</td><td class="num">{_money(r["value_base"], base)}</td>'
             f'<td class="num">{r["weight"] * 100:.1f}%</td>'
             f'<td class="num"><span class="mv {_cls(r["gain_base"])}">{_money(r["gain_base"], base, True)}'
             f' ({_pct(r["gain_pct"])})</span></td><td class="num">{prices.move_html(r["day"])}</td>'
@@ -261,8 +285,8 @@ def rebalance_tab(model: dict, base: str, uid: int) -> None:
                      f'<td class="num">{r["current"] * 100:.1f}%</td><td class="num">{r["target"] * 100:.1f}%</td>'
                      f'<td class="num">{(r["target"] - r["current"]) * 100:+.1f}%</td>'
                      f'<td class="num {action}">{_money(r["trade_value"], base, True)}</td>'
-                     f'<td class="num {action}">{(action.capitalize() + " " + f"{shares:,.2f}") if action else "–"}</td>'
-                     f'<td class="num">{_money(r["last"], r["currency"])}</td></tr>')
+                     f'<td class="num {action}">{(action.capitalize() + " " + (MASK if _hidden() else f"{shares:,.2f}")) if action else "–"}</td>'
+                     f'<td class="num">{_money(r["last"], r["currency"], always=True)}</td></tr>')
     html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Company</th><th class="num">Now</th><th class="num">Target</th>'
                '<th class="num">Gap</th><th class="num">Trade value</th><th class="num">Shares</th><th class="num">At price</th></tr>'
                f'{"".join(lines)}</table></div>')
@@ -271,6 +295,12 @@ def rebalance_tab(model: dict, base: str, uid: int) -> None:
 
 
 def _resolve(market: str, query: str) -> dict | None:
+    if market == portfolio.OTHER:
+        info, err = portfolio.add_symbol(query)
+        if err:
+            st.warning(err)
+            return None
+        return {"ticker": info["symbol"], "name_en": info["name"]}
     src = get_source(market)
     ticker = src.normalize_ticker(query)
     comp = get_company(market, ticker) if ticker else None
@@ -282,12 +312,14 @@ def _resolve(market: str, query: str) -> dict | None:
 
 def transactions_tab(user: dict, txs: list[dict]) -> None:
     uid = user["id"]
-    markets = {s.country: s.market for s in configured_sources()}
+    markets = {**{s.country: s.market for s in configured_sources()}, OTHER_LABEL: portfolio.OTHER}
     with st.form("tx-add", clear_on_submit=True, border=True):
         st.markdown("**Add a buy or sell**")
         c1, c2, c3 = st.columns([1.1, 1.6, 0.9])
         country = c1.selectbox("Country", list(markets))
-        query = c2.text_input("Ticker or name", placeholder="e.g. 005930, AAPL, EOS")
+        query = c2.text_input("Ticker or name", placeholder="e.g. 005930, AAPL, EOS, or RELIANCE.NS for Other",
+                              help="For Other, use the symbol from finance.yahoo.com, e.g. RELIANCE.NS (India), "
+                                   "VOD.L (London), SAP.DE (Germany), 0700.HK (Hong Kong), SHOP.TO (Canada).")
         kind = c3.selectbox("Type", ["Buy", "Sell"])
         c4, c5, c6, c7 = st.columns(4)
         day = c4.date_input("Date", value=date.today(), max_value=date.today())
@@ -295,18 +327,18 @@ def transactions_tab(user: dict, txs: list[dict]) -> None:
         price = c6.number_input("Price per share", min_value=0.0, step=0.01, format="%.4f",
                                 help="In the stock's own currency, e.g. AUD for Australian shares.")
         fees = c7.number_input("Fees", min_value=0.0, step=1.0, format="%.2f")
-        also = st.checkbox("Also follow its filings (add to watchlist)", value=True)
+        also = st.checkbox("Also follow its filings (add to watchlist; not available for Other)", value=True)
         if st.form_submit_button("Save", type="primary"):
             market = markets[country]
             comp = _resolve(market, query)
-            if not comp:
+            if not comp and market != portfolio.OTHER:
                 st.warning("Couldn't find that company. Use its ticker, e.g. 005930, AAPL or EOS.")
             else:
                 err = portfolio.add_transaction(uid, market, comp["ticker"], kind.lower(), day, shares, price, fees)
                 if err:
                     st.warning(err)
                 else:
-                    if also and kind == "Buy" and not watch.is_watching(uid, market, comp["ticker"]):
+                    if also and kind == "Buy" and market != portfolio.OTHER and not watch.is_watching(uid, market, comp["ticker"]):
                         watch.add(user, market, comp["ticker"])
                     st.toast(f"Saved {kind.lower()} of {comp['name_en']}")
                     st.rerun()
@@ -319,12 +351,14 @@ def transactions_tab(user: dict, txs: list[dict]) -> None:
     for t in txs[:200]:
         key = (t["market"], t["ticker"])
         if key not in names:
-            names[key] = (get_company(*key, resolve=False) or {}).get("name_en", t["ticker"])
-        cur = portfolio.CURRENCY.get(t["market"], "")
+            names[key] = ((portfolio.symbol_info(t["ticker"]) or {}).get("name") if t["market"] == portfolio.OTHER
+                          else (get_company(*key, resolve=False) or {}).get("name_en")) or t["ticker"]
+        cur = portfolio.currency_for(*key)
         c1, c2 = st.columns([6, 1], vertical_alignment="center")
-        c1.markdown(f'{t["tx_date"]:%d %b %Y}  **{t["kind"].capitalize()}** {t["shares"]:,.4g} × '
-                    f'{esc(names[key])} ({esc(t["ticker"])}) at {t["price"]:,.4g} {cur}'
-                    + (f', fees {t["fees"]:,.2f}' if t["fees"] else ""), unsafe_allow_html=True)
+        fees = (f', fees {MASK if _hidden() else f"{t['fees']:,.2f}"}' if t["fees"] else "")
+        price = MASK if _hidden() else f'{t["price"]:,.4g}'
+        c1.markdown(f'{t["tx_date"]:%d %b %Y}  **{t["kind"].capitalize()}** {_shares(t["shares"])} × '
+                    f'{esc(names[key])} ({esc(t["ticker"])}) at {price} {cur}{fees}', unsafe_allow_html=True)
         if c2.button("Delete", key=f"tx-del-{t['id']}", type="tertiary"):
             portfolio.remove_transaction(uid, t["id"])
             st.rerun()

@@ -61,6 +61,23 @@ def history(market: str, ticker: str, years: int = 1) -> list[tuple[date, float]
     return []
 
 
+def symbol_details(symbol: str) -> dict | None:
+    """Name, trading currency and exchange for any Yahoo Finance symbol, or None if it doesn't exist."""
+    try:
+        r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                         params={"range": "5d", "interval": "1d"}, headers=HEADERS, timeout=20)
+        result = ((r.json().get("chart") or {}).get("result") or [None])[0] if r.status_code == 200 else None
+    except Exception:
+        result = None
+    if not result:
+        return None
+    meta = result.get("meta") or {}
+    if not meta.get("currency"):
+        return None
+    return {"name": meta.get("longName") or meta.get("shortName") or symbol, "currency": meta["currency"],
+            "exchange": meta.get("fullExchangeName") or meta.get("exchangeName") or ""}
+
+
 def symbol_history(symbol: str, years: int = 1) -> list[tuple[date, float]]:
     """Any Yahoo symbol (benchmarks such as SPY or QQQ)."""
     try:
@@ -69,6 +86,8 @@ def symbol_history(symbol: str, years: int = 1) -> list[tuple[date, float]]:
             return data
     except Exception:
         pass
+    if "." in symbol:
+        return []
     try:
         return _stooq(f"{symbol.lower()}.us")[-(260 * years):]
     except Exception:

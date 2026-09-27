@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, insert, select, update
 
-from core.db import get_engine, holdings, price_alerts, targets, transactions, utcnow, watchlist
+from core.db import custom_symbols, get_engine, holdings, price_alerts, targets, transactions, utcnow, watchlist
 from sources import get_source
 
 from . import prices
@@ -15,6 +15,71 @@ from . import prices
 log = logging.getLogger(__name__)
 CURRENCY = {"KR": "KRW", "US": "USD", "AU": "AUD", "PL": "PLN", "JP": "JPY", "IL": "ILS"}
 KINDS = {"move": "Daily move of at least", "above": "Price rises above", "below": "Price falls below"}
+
+
+OTHER = "X"          # market code for holdings added by Yahoo Finance symbol
+SUFFIX_COUNTRY = {"NS": "India", "BO": "India", "L": "UK", "IL": "UK", "DE": "Germany", "F": "Germany", "PA": "France",
+                  "AS": "Netherlands", "BR": "Belgium", "MI": "Italy", "MC": "Spain", "LS": "Portugal", "SW": "Switzerland",
+                  "ST": "Sweden", "OL": "Norway", "CO": "Denmark", "HE": "Finland", "IR": "Ireland", "VI": "Austria",
+                  "WA": "Poland", "PR": "Czechia", "AT": "Greece", "IS": "Turkey", "TO": "Canada", "V": "Canada",
+                  "NE": "Canada", "HK": "Hong Kong", "SS": "China", "SZ": "China", "T": "Japan", "KS": "South Korea",
+                  "KQ": "South Korea", "TW": "Taiwan", "TWO": "Taiwan", "SI": "Singapore", "KL": "Malaysia",
+                  "BK": "Thailand", "JK": "Indonesia", "AX": "Australia", "NZ": "New Zealand", "SA": "Brazil",
+                  "MX": "Mexico", "BA": "Argentina", "SN": "Chile", "JO": "South Africa", "TA": "Israel",
+                  "SR": "Saudi Arabia", "QA": "Qatar", "AE": "UAE"}
+MINOR_UNITS = {"GBp": ("GBP", 100.0), "GBX": ("GBP", 100.0), "ZAc": ("ZAR", 100.0), "ILA": ("ILS", 100.0)}
+
+
+def add_symbol(symbol: str) -> tuple[dict | None, str | None]:
+    """Look up a Yahoo Finance symbol from any market and remember its name, currency and country."""
+    sym = (symbol or "").strip().upper()
+    if not sym or len(sym) > 16:
+        return None, "Enter a Yahoo Finance symbol, e.g. RELIANCE.NS, VOD.L or 0700.HK."
+    with get_engine().connect() as conn:
+        row = conn.execute(select(custom_symbols).where(custom_symbols.c.symbol == sym)).mappings().first()
+    if row:
+        return dict(row), None
+    details = prices.symbol_details(sym)
+    if not details:
+        return None, f"Yahoo Finance doesn't recognise {sym}. Check the symbol on finance.yahoo.com."
+    currency, scale = MINOR_UNITS.get(details["currency"], (details["currency"].upper(), 1.0))
+    suffix = sym.rsplit(".", 1)[1] if "." in sym else ""
+    country = SUFFIX_COUNTRY.get(suffix, "USA" if not suffix else details["exchange"] or "Other")
+    row = {"symbol": sym, "name": details["name"], "currency": currency, "scale": scale, "country": country}
+    with get_engine().begin() as conn:
+        conn.execute(insert(custom_symbols).values(**row))
+    return row, None
+
+
+def symbol_info(symbol: str) -> dict | None:
+    with get_engine().connect() as conn:
+        row = conn.execute(select(custom_symbols).where(custom_symbols.c.symbol == symbol)).mappings().first()
+    return dict(row) if row else None
+
+
+def currency_for(market: str, ticker: str) -> str:
+    if market == OTHER:
+        info = symbol_info(ticker)
+        return info["currency"] if info else "USD"
+    return CURRENCY.get(market, "USD")
+
+
+def price_history(market: str, ticker: str, years: int = 1) -> list:
+    """Daily closes in the holding's currency (any-market symbols are converted from pence and similar)."""
+    if market != OTHER:
+        return prices.history(market, ticker, years)
+    info = symbol_info(ticker) or {"scale": 1.0}
+    return [(d, v / (info["scale"] or 1.0)) for d, v in prices.symbol_history(ticker, years)]
+
+
+def hide_amounts(user_id: int) -> bool:
+    from core.usage import get_state
+    return get_state(f"hide_amt:{user_id}", "0") == "1"
+
+
+def set_hide_amounts(user_id: int, hidden: bool) -> None:
+    from core.usage import set_state
+    set_state(f"hide_amt:{user_id}", "1" if hidden else "0")
 
 
 HOME_CURRENCIES = ["USD", "AUD", "KRW", "INR", "EUR", "GBP", "JPY", "PLN", "ILS", "SGD", "HKD", "CAD", "CHF", "CNY"]
@@ -120,13 +185,14 @@ def remove_holding(user_id: int, market: str, ticker: str) -> None:
 
 
 def value(h: dict, hist: list) -> dict:
+    cur = currency_for(h["market"], h["ticker"])
     last = hist[-1][1] if hist else None
     cost = h["shares"] * h["avg_price"]
     worth = h["shares"] * last if last is not None else None
     return {**h, "last": last, "cost": cost, "value": worth,
             "gain": (worth - cost) if worth is not None else None,
             "gain_pct": ((worth / cost - 1) if worth is not None and cost else None),
-            "day": prices.last_move(hist) if hist else None, "currency": CURRENCY.get(h["market"], "")}
+            "day": prices.last_move(hist) if hist else None, "currency": cur}
 
 
 # ---- price alerts -----------------------------------------------------------------------

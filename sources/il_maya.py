@@ -30,7 +30,9 @@ REPORTS = "https://mayaapi.tase.co.il/api/company/reports"
 REPORT_PAGE = "https://maya.tase.co.il/reports/details/{}"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                          "Chrome/140.0.0.0 Safari/537.36",
-           "Accept-Language": "en-US,en;q=0.9", "Origin": "https://maya.tase.co.il", "X-Maya-With": "allow"}
+           "Accept-Language": "he-IL,he;q=0.9,en;q=0.8", "Origin": "https://maya.tase.co.il", "X-Maya-With": "allow"}
+# MAYA's English view lists only reports available in English (mostly the exchange's own notices); the Hebrew
+# view lists every company report, so reports are read in Hebrew and their titles translated.
 PAUSE = 1.0                 # at most one request a second
 BLOCK_HOURS = 24
 MAX_PAGES = 3               # 30 reports a page
@@ -40,7 +42,7 @@ class MayaWebSource(FilingSource):
     market = "IL"
     country = "Israel"
     regulator = "MAYA"
-    source_lang = "auto"
+    source_lang = "iw"            # Hebrew (titles are translated to English)
     timezone = "Asia/Jerusalem"
     ticker_hint = "TASE symbol, e.g. LUMI, or company name"
     news_local = {"hl": "he", "gl": "IL", "ceid": "IL:he"}
@@ -100,7 +102,7 @@ class MayaWebSource(FilingSource):
             if self._listing is not None and time.time() - self._listing_at < 86400:
                 return self._listing
             english = self._get(COMPANY_LIST, {"lang": 1}, "https://www.tase.co.il/")
-            hebrew = self._get(COMPANY_LIST, {"lang": 0}, "https://www.tase.co.il/")
+            hebrew = self._get(COMPANY_LIST, {"lang": 0}, "https://www.tase.co.il/")   # names; lang decides, not the header
             names_en = {str(e.get("Id")): e.get("Name") or "" for e in english if e.get("Type") == 5}
             names_he = {str(e.get("Id")): e.get("Name") or "" for e in hebrew if e.get("Type") == 5}
             out, seen = [], set()

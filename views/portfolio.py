@@ -7,7 +7,8 @@ import streamlit as st
 from core.ui import esc, html_block, logo_html, page_header
 from services import importer, portfolio, prices, watch
 from services.pipeline import filings_for, get_company, search_companies
-from services.portfolio_calc import (PERIODS, Series, allocation, daily_values, period_returns, positions,
+from services.portfolio_calc import (PERIODS, Series, allocation, daily_values, money_series, money_weighted_returns,
+                                     period_returns, positions, shadow_benchmark,
                                      rebalance, twr_index)
 from sources import configured_sources, get_source, visible_sources
 
@@ -129,8 +130,10 @@ def build(txs: list[dict], base: str, bench_symbol: str | None) -> dict:
     cost = sum(r["cost_base"] for r in rows)
     today_change = (daily[-1]["value"] - daily[-2]["value"] - daily[-1]["flow"]) if len(daily) >= 2 else None
     rows.sort(key=lambda r: -(r["value_base"] or 0))
-    return {"rows": rows, "daily": daily, "index": index, "bench": bench_base, "problems": problems,
-            "returns": period_returns(index, bench_base) if index else [], "total": total, "cost": cost,
+    shadow = shadow_benchmark(daily, bench_base) if bench_base and daily else []
+    return {"rows": rows, "daily": daily, "index": index, "bench": bench_base, "problems": problems, "shadow": shadow,
+            "returns": period_returns(index, bench_base) if index else [],
+            "money_returns": money_weighted_returns(daily, shadow or None) if daily else [], "total": total, "cost": cost,
             "realized": realized, "today_change": today_change, "convert": convert}
 
 
@@ -144,7 +147,7 @@ def quick_summary(uid: int, base: str, signature: str) -> dict | None:
     if not model["rows"]:
         return None
     return {"value": model["total"], "today": model["today_change"],
-            "today_pct": model["returns"][0]["portfolio"] if model["returns"] else None,
+            "today_pct": model["money_returns"][0]["portfolio"] if model["money_returns"] else None,
             "gain": model["total"] - model["cost"] + model["realized"], "cost": model["cost"]}
 
 
@@ -202,37 +205,56 @@ def page() -> None:
 
 
 def overview(model: dict, base: str, bench_symbol: str | None) -> None:
-    period = st.segmented_control("Chart period", CHART_PERIODS, default="1Y", key="pf-period",
+    c1, c2 = st.columns([1.3, 2], vertical_alignment="center")
+    method = c1.segmented_control("Returns", ["On your money", "Time-weighted"], default="On your money", key="pf-method",
+                                  help="On your money: gain divided by the money you had in, so it matches your total gain. "
+                                       "Time-weighted: how the investments performed regardless of when money was added; "
+                                       "it can look very high if early, small holdings rose a lot.") or "On your money"
+    period = c2.segmented_control("Chart period", CHART_PERIODS, default="1Y", key="pf-period",
                                   label_visibility="collapsed") or "1Y"
-    index = model["index"]
+    index, daily = model["index"], model["daily"]
     end = index[-1][0]
     start = {"1M": end - timedelta(days=30), "3M": end - timedelta(days=91), "6M": end - timedelta(days=182),
              "YTD": date(end.year, 1, 1), "1Y": end - timedelta(days=365), "2Y": end - timedelta(days=730),
              "3Y": end - timedelta(days=1095), "All": index[0][0]}[period]
-    part = [(d, v) for d, v in index if d >= start]
-    if len(part) >= 2:
+    if method == "On your money":
+        part = [(d, 1 + r) for d, r in money_series(daily, max(start, daily[0]["date"]))]
+        bench = [(d, 1 + r) for d, r in money_series(model["shadow"], max(start, daily[0]["date"]))] if model["shadow"] else []
+        if part:
+            part = [(part[0][0] - timedelta(days=1), 1.0)] + part
+            bench = ([(bench[0][0] - timedelta(days=1), 1.0)] + bench) if bench else []
+    else:
+        part = [(d, v) for d, v in index if d >= start]
         bench = [(d, model["bench"].at(d)) for d, _ in part] if model["bench"] else []
+    if len(part) >= 2:
         html_block(performance_svg(part, [(d, v) for d, v in bench if v], bench_symbol or ""))
     else:
         st.caption("Not enough history for this period yet.")
 
     tiles = []
-    for r in model["returns"]:
+    for r in (model["money_returns"] if method == "On your money" else model["returns"]):
         b = (f'<div class="b">{esc(bench_symbol)} <span class="{_cls(r["benchmark"])}">{_pct(r["benchmark"])}</span></div>'
              if bench_symbol and r["benchmark"] is not None else "")
         note = '<div class="note">since first buy</div>' if r["partial"] else ""
         tiles.append(f'<div class="ret"><div class="lbl">{r["label"]}</div>'
                      f'<div class="p {_cls(r["portfolio"])}">{_pct(r["portfolio"])}</div>{b}{note}</div>')
     html_block('<div class="ret-grid">' + "".join(tiles) + "</div>")
-    st.caption("Time-weighted returns in " + base + ", so adding or withdrawing money doesn't distort them. "
-               + (f"{bench_symbol} is price return in the same currency." if bench_symbol else ""))
+    if method == "On your money":
+        st.caption(f"Return on your money in {base}: the gain in each period divided by what you had invested at its start "
+                   "plus money added during it. 'All' equals your total gain. "
+                   + (f"{bench_symbol} shows what the same money, put in on the same days, would have made." if bench_symbol else ""))
+    else:
+        st.caption(f"Time-weighted returns in {base}: how the investments performed, ignoring when money was added. They can "
+                   "be much higher than your total gain if early, smaller holdings rose a lot. "
+                   + (f"{bench_symbol} is its price return over the same periods." if bench_symbol else ""))
 
     total, cost, realized = model["total"], model["cost"], model["realized"]
     gain = total - cost + realized
+    added = sum(max(r["flow"], 0.0) for r in model["daily"])
     stats = [("Value", _money(total, base), ""),
-             ("Total gain", _money(gain, base, True), f'{_pct(gain / cost if cost else None)} on {_money(cost, base)} invested'),
+             ("Total gain", _money(gain, base, True), f'{_pct(gain / added if added else None)} on {_money(added, base)} put in'),
              ("Today", _money(model["today_change"], base, True) if model["today_change"] is not None else "–",
-              _pct(model["returns"][0]["portfolio"]) if model["returns"] else ""),
+              _pct(model["money_returns"][0]["portfolio"]) if model["money_returns"] else ""),
              ("Realised gains", _money(realized, base, True), "from sales")]
     html_block('<div class="stat-grid">' + "".join(
         f'<div class="stat"><div class="k">{k}</div><div class="v">{esc(v)}</div><div class="k">{esc(sub)}</div></div>'

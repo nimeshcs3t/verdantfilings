@@ -112,6 +112,18 @@ def health_panel() -> None:
                 for r in warn_runs:
                     st.caption(f"{relative_time(r['started_at'])}")
                     st.code(r["warnings"][:1500], language=None)
+    try:
+        from sources import get_source
+        il = get_source("IL")
+        if il is not None and getattr(il, "admin_only", False) and il.is_configured():
+            until = il.blocked_until()
+            if until:
+                st.warning(f"Israel (MAYA) is paused until {until:%d %b %H:%M} UTC after MAYA refused a request. "
+                           "It resumes by itself.")
+            else:
+                st.caption("Israel (MAYA): active.")
+    except Exception:
+        pass
     usage = h["usage"]
     shown = {USAGE_NAMES.get(k, k): v for k, v in usage.items() if k in USAGE_NAMES}
     c1, c2 = st.columns(2)

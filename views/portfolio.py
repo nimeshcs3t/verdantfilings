@@ -5,9 +5,10 @@ import pandas as pd
 import streamlit as st
 
 from core.ui import esc, html_block, logo_html, page_header
-from services import portfolio, prices, watch
+from services import importer, portfolio, prices, watch
 from services.pipeline import filings_for, get_company, search_companies
-from services.portfolio_calc import PERIODS, Series, allocation, daily_values, period_returns, positions, rebalance, twr_index
+from services.portfolio_calc import (PERIODS, Series, allocation, daily_values, period_returns, positions,
+                                     rebalance, twr_index)
 from sources import configured_sources, get_source, visible_sources
 
 from .portfolio_charts import donut_svg, performance_svg
@@ -133,6 +134,20 @@ def build(txs: list[dict], base: str, bench_symbol: str | None) -> dict:
             "realized": realized, "today_change": today_change, "convert": convert}
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def quick_summary(uid: int, base: str, signature: str) -> dict | None:
+    """Portfolio value and today's move for the Today page header (cached for 10 minutes or until trades change)."""
+    txs = portfolio.list_transactions(uid)
+    if not txs:
+        return None
+    model = build(txs, base, None)
+    if not model["rows"]:
+        return None
+    return {"value": model["total"], "today": model["today_change"],
+            "today_pct": model["returns"][0]["portfolio"] if model["returns"] else None,
+            "gain": model["total"] - model["cost"] + model["realized"], "cost": model["cost"]}
+
+
 def page() -> None:
     user = st.session_state["user"]
     uid = user["id"]
@@ -235,17 +250,17 @@ def holdings_table(model: dict, base: str, uid: int) -> None:
         src = get_source(r["market"])
         recent = len(filings_for([(r["market"], r["ticker"])], src.today() - timedelta(days=7))) if src else ""
         lines.append(
-            f'<tr><td>{logo_html(r["name"], r["ticker"])}{esc(r["name"])} <span class="fl-tk">{esc(r["ticker"])}</span></td>'
-            f'<td class="num">{_shares(r["shares"])}</td><td class="num">{_money(r["avg"], r["currency"], always=True)}</td>'
+            f'<tr><td>{logo_html(r["name"], r["ticker"], market=r["market"])}{esc(r["name"])} <span class="fl-tk">{esc(r["ticker"])}</span></td>'
+            f'<td class="num">{_shares(r["shares"])}</td><td class="num opt">{_money(r["avg"], r["currency"], always=True)}</td>'
             f'<td class="num">{_money(r["last"], r["currency"], always=True)}</td><td class="num">{_money(r["value_base"], base)}</td>'
-            f'<td class="num">{r["weight"] * 100:.1f}%</td>'
+            f'<td class="num opt">{r["weight"] * 100:.1f}%</td>'
             f'<td class="num"><span class="mv {_cls(r["gain_base"])}">{_money(r["gain_base"], base, True)}'
-            f' ({_pct(r["gain_pct"])})</span></td><td class="num">{prices.move_html(r["day"])}</td>'
-            f'<td class="num">{recent or ""}</td></tr>')
+            f' ({_pct(r["gain_pct"])})</span></td><td class="num opt">{prices.move_html(r["day"])}</td>'
+            f'<td class="num opt">{recent or ""}</td></tr>')
     html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Company</th><th class="num">Shares</th>'
-               '<th class="num">Avg cost</th><th class="num">Last price</th><th class="num">Value</th>'
-               '<th class="num">Weight</th><th class="num">Gain</th><th class="num">Today</th>'
-               f'<th class="num">Filings 7d</th></tr>{"".join(lines)}</table></div>')
+               '<th class="num opt">Avg cost</th><th class="num">Last price</th><th class="num">Value</th>'
+               '<th class="num opt">Weight</th><th class="num">Gain</th><th class="num opt">Today</th>'
+               f'<th class="num opt">Filings 7d</th></tr>{"".join(lines)}</table></div>')
     st.caption(f"Cost and last price in each stock's own currency; value and gain in {base}, with cost converted at "
                "the exchange rate on each purchase date (so gains include currency moves). Prices may be delayed.")
 
@@ -310,6 +325,46 @@ def _resolve(market: str, query: str) -> dict | None:
     return comp
 
 
+def _market_close(market: str, ticker: str, day: date) -> float | None:
+    hist = long_history(market, ticker)
+    return Series(hist).at(day) if hist else None
+
+
+def _checked_price(market: str, ticker: str, day: date, price: float, confirmed: bool) -> tuple[float | None, str | None]:
+    """Catch prices far from the market price; convert Israeli prices typed in agorot to shekels."""
+    close = _market_close(market, ticker, day)
+    if not close or not price:
+        return price, None
+    ratio = price / close
+    if market == "IL" and 60 <= ratio <= 160:
+        st.toast(f"Converted {price:,.2f} agorot to {price / 100:,.2f} shekels")
+        return price / 100, None
+    if (ratio > 3 or ratio < 1 / 3) and not confirmed:
+        return None, (f"{price:,.4g} is far from the market price that day (about {close:,.4g} "
+                      f"{portfolio.currency_for(market, ticker)}). Check the price and currency, then tick "
+                      "\"The price is correct\" to save anyway.")
+    return price, None
+
+
+def _close_on(market: str, ticker: str, day) -> float | None:
+    hist = long_history(market, ticker)
+    before = [v for d, v in hist if d <= day]
+    return before[-1] if before else None
+
+
+def _checked_price(market: str, ticker: str, day, price: float, confirmed: bool) -> tuple[float | None, str | None]:
+    """(price to save, message). price is None when the user should check it first."""
+    close = _close_on(market, ticker, day)
+    if close and price > 0:
+        ratio = price / close
+        if market == "IL" and 50 <= ratio <= 200:
+            return price / 100, f"Converted {price:,.4g} agorot to {price / 100:,.4g} shekels (TASE shows prices in agorot)."
+        if (ratio > 3 or ratio < 1 / 3) and not confirmed:
+            return None, (f"The market closed at about {close:,.4g} on that date, so {price:,.4g} looks off. Check it is "
+                          "the price per share in the stock's own currency, or tick \"The price is correct\" to save anyway.")
+    return price, None
+
+
 def transactions_tab(user: dict, txs: list[dict]) -> None:
     uid = user["id"]
     markets = {**{s.country: s.market for s in visible_sources(user)}, OTHER_LABEL: portfolio.OTHER}
@@ -325,42 +380,166 @@ def transactions_tab(user: dict, txs: list[dict]) -> None:
         day = c4.date_input("Date", value=date.today(), max_value=date.today())
         shares = c5.number_input("Shares", min_value=0.0, step=1.0, format="%.4g")
         price = c6.number_input("Price per share", min_value=0.0, step=0.01, format="%.4f",
-                                help="In the stock's own currency, e.g. AUD for Australian shares.")
+                                help="In the stock's own currency, e.g. AUD for Australian shares, shekels for Israel "
+                                     "(agorot are converted automatically).")
         fees = c7.number_input("Fees", min_value=0.0, step=1.0, format="%.2f")
-        also = st.checkbox("Also follow its filings (add to watchlist; not available for Other)", value=True)
+        c8, c9 = st.columns(2)
+        also = c8.checkbox("Also follow its filings (not available for Other)", value=True)
+        confirmed = c9.checkbox("The price is correct (skip the price check)")
         if st.form_submit_button("Save", type="primary"):
             market = markets[country]
             comp = _resolve(market, query)
             if not comp and market != portfolio.OTHER:
                 st.warning("Couldn't find that company. Use its ticker, e.g. 005930, AAPL or EOS.")
-            else:
-                err = portfolio.add_transaction(uid, market, comp["ticker"], kind.lower(), day, shares, price, fees)
-                if err:
-                    st.warning(err)
+            elif comp:
+                use, message = _checked_price(market, comp["ticker"], day, price, confirmed)
+                if use is None:
+                    st.warning(message)
                 else:
-                    if also and kind == "Buy" and market != portfolio.OTHER and not watch.is_watching(uid, market, comp["ticker"]):
-                        watch.add(user, market, comp["ticker"])
-                    st.toast(f"Saved {kind.lower()} of {comp['name_en']}")
-                    st.rerun()
+                    err = portfolio.add_transaction(uid, market, comp["ticker"], kind.lower(), day, shares, use, fees)
+                    if err:
+                        st.warning(err)
+                    else:
+                        if also and kind == "Buy" and market != portfolio.OTHER and not watch.is_watching(uid, market, comp["ticker"]):
+                            watch.add(user, market, comp["ticker"])
+                        if message:
+                            st.session_state["pf-note"] = message
+                        st.toast(f"Saved {kind.lower()} of {comp['name_en']}")
+                        st.rerun()
+    import_section(user, markets)
+    if st.session_state.get("pf-note"):
+        st.info(st.session_state.pop("pf-note"))
     if not txs:
         st.caption("No transactions yet.")
         return
     st.caption("Holdings saved before transactions existed were turned into buys dated the day you added them. "
-               "For accurate returns, delete those and add them again with the real purchase date.")
+               "Edit them to set the real purchase date and price.")
     names = {}
+    editing = st.session_state.get("pf-edit")
     for t in txs[:200]:
         key = (t["market"], t["ticker"])
         if key not in names:
             names[key] = ((portfolio.symbol_info(t["ticker"]) or {}).get("name") if t["market"] == portfolio.OTHER
                           else (get_company(*key, resolve=False) or {}).get("name_en")) or t["ticker"]
         cur = portfolio.currency_for(*key)
-        c1, c2 = st.columns([6, 1], vertical_alignment="center")
-        fees = (f', fees {MASK if _hidden() else f"{t['fees']:,.2f}"}' if t["fees"] else "")
-        price = MASK if _hidden() else f'{t["price"]:,.4g}'
+        close = _close_on(*key, t["tx_date"])
+        odd = bool(close and t["price"] and not (1 / 3 <= t["price"] / close <= 3))
+        flag = (f' <span class="fl-flag">⚠ price looks off (market about {close:,.4g})</span>' if odd and not _hidden()
+                else ' <span class="fl-flag">⚠ price looks off</span>' if odd else "")
+        fee_text = (f', fees {MASK if _hidden() else f"{t['fees']:,.2f}"}' if t["fees"] else "")
+        price_text = MASK if _hidden() else f'{t["price"]:,.4g}'
+        c1, c2, c3 = st.columns([6, 0.8, 0.8], vertical_alignment="center")
         c1.markdown(f'{t["tx_date"]:%d %b %Y}  **{t["kind"].capitalize()}** {_shares(t["shares"])} × '
-                    f'{esc(names[key])} ({esc(t["ticker"])}) at {price} {cur}{fees}', unsafe_allow_html=True)
-        if c2.button("Delete", key=f"tx-del-{t['id']}", type="tertiary"):
+                    f'{esc(names[key])} ({esc(t["ticker"])}) at {price_text} {cur}{fee_text}{flag}', unsafe_allow_html=True)
+        if c2.button("Edit", key=f"tx-edit-{t['id']}", type="tertiary"):
+            st.session_state["pf-edit"] = t["id"]
+            st.rerun()
+        if c3.button("Delete", key=f"tx-del-{t['id']}", type="tertiary"):
             portfolio.remove_transaction(uid, t["id"])
+            st.rerun()
+        if editing == t["id"]:
+            with st.form(f"tx-edit-form-{t['id']}", border=True):
+                st.markdown(f"**Edit {esc(names[key])} ({esc(t['ticker'])})**")
+                e1, e2, e3, e4, e5 = st.columns([0.9, 1.1, 1, 1, 0.9])
+                new_kind = e1.selectbox("Type", ["Buy", "Sell"], index=0 if t["kind"] == "buy" else 1)
+                new_day = e2.date_input("Date", value=t["tx_date"], max_value=date.today())
+                new_shares = e3.number_input("Shares", min_value=0.0, value=float(t["shares"]), step=1.0, format="%.4g")
+                new_price = e4.number_input(f"Price ({cur})", min_value=0.0, value=float(t["price"]), step=0.01, format="%.4f")
+                new_fees = e5.number_input("Fees", min_value=0.0, value=float(t["fees"] or 0), step=1.0, format="%.2f")
+                ok_price = st.checkbox("The price is correct (skip the price check)", key=f"tx-ok-{t['id']}")
+                b1, b2, _ = st.columns([1, 1, 4])
+                save = b1.form_submit_button("Save changes", type="primary")
+                cancel = b2.form_submit_button("Cancel")
+            if cancel:
+                st.session_state.pop("pf-edit", None)
+                st.rerun()
+            if save:
+                use, message = _checked_price(t["market"], t["ticker"], new_day, new_price, ok_price)
+                if use is None:
+                    st.warning(message)
+                else:
+                    err = portfolio.update_transaction(uid, t["id"], new_kind.lower(), new_day, new_shares, use, new_fees)
+                    if err:
+                        st.warning(err)
+                    else:
+                        st.session_state.pop("pf-edit", None)
+                        if message:
+                            st.session_state["pf-note"] = message
+                        st.toast("Transaction updated")
+                        st.rerun()
+
+
+def _import_resolver(market: str, symbol: str) -> dict | None:
+    if market == portfolio.OTHER:
+        info, _ = portfolio.add_symbol(symbol)
+        return {"ticker": info["symbol"], "name_en": info["name"]} if info else None
+    src = get_source(market)
+    if not src:
+        return None
+    ticker = src.normalize_ticker(symbol)
+    comp = get_company(market, ticker) if ticker else None
+    if not comp:
+        found = search_companies(market, symbol)
+        comp = get_company(market, found[0].ticker) if len(found) == 1 else None
+    return comp
+
+
+def import_section(user: dict, markets: dict) -> None:
+    with st.expander("Import from a broker file (CSV)", icon=":material/upload_file:"):
+        st.caption("Export your trades from your broker as a CSV file and upload it here. You'll see every row checked "
+                   "before anything is saved, and rows already in your transactions are skipped.")
+        up = st.file_uploader("Broker CSV file", type=["csv", "txt"], key="imp-file")
+        if not up:
+            return
+        try:
+            frame = importer.read(up.getvalue())
+        except Exception:
+            st.error("Couldn't read that file. Save it as CSV (comma or semicolon separated) and try again.")
+            return
+        file_key = f"{up.name}:{up.size}"
+        if st.session_state.get("imp-key") != file_key:
+            st.session_state["imp-key"] = file_key
+            st.session_state.pop("imp-plan", None)
+        st.caption(f"{len(frame)} rows found. Check the column matches below.")
+        guess = importer.guess_columns(list(frame.columns))
+        options = ["(none)"] + list(frame.columns)
+        labels = {"date": "Date", "symbol": "Symbol or ticker", "action": "Buy / sell", "shares": "Quantity",
+                  "price": "Price per share", "fees": "Fees (optional)", "market": "Market (optional)"}
+        cols = st.columns(4)
+        mapping = {}
+        for i, (field, label) in enumerate(labels.items()):
+            chosen = cols[i % 4].selectbox(label, options, index=options.index(guess[field]) if guess.get(field) else 0,
+                                           key=f"imp-col-{field}")
+            mapping[field] = None if chosen == "(none)" else chosen
+        c1, c2 = st.columns(2)
+        default_country = c1.selectbox("Market for rows without one", list(markets), key="imp-market",
+                                       help="Used when the file has no market column, or a market the app doesn't know.")
+        dates = frame[mapping["date"]].tolist()[:50] if mapping.get("date") else []
+        order = c2.selectbox("Dates are written", ["Day first (31/12/2025)", "Month first (12/31/2025)"],
+                             index=0 if importer.day_first_guess(dates) else 1, key="imp-order")
+        if st.button("Check rows", key="imp-check"):
+            with st.spinner("Checking each row"):
+                st.session_state["imp-plan"] = importer.plan(frame, mapping, markets[default_country],
+                                                             order.startswith("Day"), user["id"], _import_resolver)
+        rows = st.session_state.get("imp-plan")
+        if not rows:
+            return
+        counts = {}
+        for r in rows:
+            counts[r["status"]] = counts.get(r["status"], 0) + 1
+        st.markdown("   ".join(f"**{counts[k]}** {k}" for k in ("ready", "warning", "duplicate", "problem", "skip") if k in counts))
+        table = pd.DataFrame([{"Line": r["line"], "Status": r["status"], "Date": r.get("date"), "Symbol": r.get("symbol"),
+                               "Company": r.get("name", ""), "Type": r.get("kind") or "",
+                               "Quantity": r.get("shares"), "Price": r.get("price"), "Fees": r.get("fees"),
+                               "Note": r.get("note", "")} for r in rows])
+        st.dataframe(table, hide_index=True, width="stretch", height=min(400, 38 + 35 * len(rows)))
+        include = st.checkbox("Also import rows with warnings (unusual prices)", key="imp-warn")
+        n = counts.get("ready", 0) + (counts.get("warning", 0) if include else 0)
+        if st.button(f"Import {n} row{'s' if n != 1 else ''}", type="primary", disabled=n == 0, key="imp-go"):
+            saved, errors = importer.save(rows, user["id"], include)
+            st.session_state.pop("imp-plan", None)
+            st.session_state["pf-note"] = f"Imported {saved} transaction{'s' if saved != 1 else ''}." + (
+                " Problems: " + "; ".join(errors[:5]) if errors else "")
             st.rerun()
 
 

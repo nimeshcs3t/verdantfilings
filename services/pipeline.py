@@ -295,6 +295,21 @@ def retranslate_titles(limit: int = 200) -> int:
     return fixed
 
 
+def _due(name: str, minutes: int) -> bool:
+    """True (and remembered) if `name` hasn't run in the last `minutes` minutes."""
+    from datetime import datetime, timezone
+    from core.usage import get_state, set_state
+    now = datetime.now(timezone.utc)
+    last = get_state(name)
+    try:
+        if last and (now - datetime.fromisoformat(last)).total_seconds() < minutes * 60 - 30:
+            return False
+    except ValueError:
+        pass
+    set_state(name, now.isoformat())
+    return True
+
+
 class _WarningCollector(logging.Handler):
     def __init__(self):
         super().__init__(level=logging.WARNING)
@@ -323,13 +338,16 @@ def run_once() -> dict:
             except Exception as exc:
                 stats["errors"] += 1
                 log.warning("sync failed for %s:%s: %s", market, ticker, exc)
-        from . import bot, briefs, events, financials, housekeeping, insiders, portfolio
+        from . import bot, briefs, events, financials, housekeeping, insiders, logos, portfolio
         from .alerts import run_alerts
-        steps = [("retranslated", retranslate_titles), ("summaries", process_overviews), (None, run_alerts),
-                 ("commands", bot.process_updates), ("financials", financials.refresh),
-                 ("insiders", insiders.refresh), ("events", events.refresh), ("briefs", briefs.refresh),
-                 ("price_alerts", portfolio.check_alerts)]
-        for key, step in steps:
+        # (stats key, job, minimum minutes between runs; 0 = every run)
+        steps = [("retranslated", retranslate_titles, 0), ("summaries", process_overviews, 0), (None, run_alerts, 0),
+                 ("commands", bot.process_updates, 0), ("price_alerts", portfolio.check_alerts, 0),
+                 ("events", events.refresh, 30), ("insiders", insiders.refresh, 60),
+                 ("financials", financials.refresh, 360), ("briefs", briefs.refresh, 360), ("logos", logos.refresh, 360)]
+        for key, step, every in steps:
+            if every and not _due(f"job:{key}", every):
+                continue
             try:
                 result = step()
                 if key:

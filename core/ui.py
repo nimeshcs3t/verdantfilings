@@ -40,6 +40,9 @@ def css() -> str:
     tokens = "".join(f"--{k}:{val};" for k, val in v.items())
     chips = "".join(f".chip.c-{k}{{background:{c[2] if dark else c[0]};color:{c[3] if dark else c[1]};}}"
                     for k, c in CHIP.items())
+    if dark:
+        chips += (".k-results{background:#173726 !important}.k-meeting{background:#232838 !important}"
+                  ".k-dividend{background:#12332F !important}.k-other{background:#242A28 !important}")
     return f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500&family=Noto+Sans+JP:wght@400;500&display=swap');
@@ -64,6 +67,9 @@ def css() -> str:
 .logo {{ display:inline-flex; width:24px; height:24px; border-radius:6px; align-items:center; justify-content:center;
         font-size:.66rem; font-weight:700; color:#fff; margin-right:9px; vertical-align:-6px; letter-spacing:.02em;
         flex-shrink:0; }}
+.logo {{ position:relative; overflow:hidden; }}
+.logo img {{ position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#fff; padding:2px;
+            box-sizing:border-box; border-radius:inherit; }}
 .logo.lg {{ width:44px; height:44px; font-size:1rem; border-radius:10px; margin-right:14px; vertical-align:-10px; }}
 
 .fl-row {{ display:grid; grid-template-columns:58px 1fr auto; gap:16px; padding:14px 0 6px; border-top:1px solid var(--rule); }}
@@ -173,8 +179,43 @@ def css() -> str:
 .alloc-legend .nm {{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:8px; }}
 .alloc-legend b {{ font-weight:600; font-variant-numeric:tabular-nums; }}
 .tbl td.buy {{ color:var(--up); font-weight:600; }} .tbl td.sell {{ color:var(--down); font-weight:600; }}
+.cal-title {{ text-align:center; font-size:1.25rem; font-weight:700; color:var(--ink); }}
+.cal-grid {{ display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); border-top:1px solid var(--rule);
+            border-left:1px solid var(--rule); margin:8px 0 14px; }}
+.cal-dow {{ font-size:.75rem; color:var(--muted); font-weight:600; padding:6px; border-right:1px solid var(--rule);
+           border-bottom:1px solid var(--rule); }}
+.cal-day {{ min-height:96px; padding:4px 5px; border-right:1px solid var(--rule); border-bottom:1px solid var(--rule); }}
+.cal-day.out {{ opacity:.45; }} .cal-day.today {{ background:var(--pine-soft); }}
+.cal-num {{ font-size:.8rem; color:var(--muted); font-weight:600; margin-bottom:2px; }}
+.cal-ev {{ display:block; font-size:.72rem; line-height:1.25; padding:2px 4px; margin:2px 0; border-radius:4px;
+          text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }}
+.cal-ev:hover {{ text-decoration:underline; }}
+.cal-more {{ font-size:.7rem; color:var(--muted); }}
+.k-results {{ background:#E3F4EA; }} .k-meeting {{ background:#EEF1F7; }} .k-dividend {{ background:#E0F2F1; }} .k-other {{ background:#F1F3F2; }}
+.cal-dot {{ display:inline-block; width:9px; height:9px; border-radius:50%; margin:0 8px 0 2px; }}
+.cal-agenda {{ display:block; }}
+.dash {{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin:2px 0 14px; }}
+.dash .stat .sub {{ color:var(--muted); font-size:.78rem; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
 .empty {{ border:1px dashed var(--rule); padding:18px 20px; color:var(--muted); margin:8px 0 16px; border-radius:6px; }}
 .brand {{ font-size:2.2rem; font-weight:700; letter-spacing:-0.02em; color:var(--ink); margin:3rem 0 .3rem; }}
+.st-key-bottomnav {{ display:none !important; }}
+@media (max-width:640px) {{
+  .st-key-bottomnav {{ display:flex !important; position:fixed; left:0; right:0; bottom:0; z-index:1000; margin:0 !important;
+                      background:var(--card); border-top:1px solid var(--rule); justify-content:space-around;
+                      padding:2px 2px calc(4px + env(safe-area-inset-bottom)); box-shadow:0 -2px 10px rgba(0,0,0,.06); }}
+  .st-key-bottomnav > div {{ flex:1 1 0; min-width:0; }}
+  .st-key-bottomnav a {{ flex-direction:column !important; gap:0 !important; padding:4px 2px !important; justify-content:center; }}
+  .st-key-bottomnav a p {{ font-size:.66rem !important; }}
+  [data-testid="stMainBlockContainer"], .block-container {{ padding-bottom:84px !important; }}
+  .tbl {{ font-size:.8rem; }} .tbl td, .tbl th {{ padding:6px 4px; }}
+  .tbl .opt {{ display:none; }}
+  .stat-grid {{ grid-template-columns:repeat(2, 1fr); gap:6px; }} .stat {{ padding:8px 10px; }} .stat .v {{ font-size:1.05rem; }}
+  .ret-grid {{ grid-template-columns:repeat(3, 1fr); gap:6px; }} .ret {{ padding:6px 8px; }} .ret .p {{ font-size:.95rem; }}
+  .alloc-body svg {{ width:110px; height:110px; }}
+  .fl-row {{ padding:10px 0 4px; }} .chip {{ font-size:.68rem; padding:1px 6px; }}
+  .cal-grid {{ display:none; }} .cal-agenda {{ display:block; }}
+  .dash {{ grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; }}
+}}
 @media (max-width:640px) {{
   [data-testid="stMainBlockContainer"], .block-container {{ padding-left:1rem; padding-right:1rem; padding-top:1rem; }}
   .page-title, .co-name {{ font-size:1.55rem; }}
@@ -224,12 +265,30 @@ def relative_time(dt: datetime | None) -> str:
     return short_date(as_utc(dt).astimezone(ZoneInfo("Asia/Seoul")).date())
 
 
-def logo_html(name: str, ticker: str, large: bool = False) -> str:
-    """Letter logo: initials on a colour picked from the ticker, so each company keeps the same one."""
+@st.cache_data(ttl=900, show_spinner=False)
+def _logo_urls() -> dict:
+    try:
+        from services.logos import all_logos
+        found = all_logos()
+    except Exception:
+        return {}
+    by_ticker = {}
+    for (m, t), url in found.items():
+        by_ticker.setdefault(t, url)
+    return {"pair": found, "ticker": by_ticker}
+
+
+def logo_html(name: str, ticker: str, large: bool = False, market: str | None = None) -> str:
+    """Company logo where one is known, over a letter tile (initials on a colour picked from the ticker).
+    If the image fails to load, the letter tile underneath shows instead."""
     words = [w for w in (name or ticker or "?").replace("-", " ").split() if w[:1].isalnum()]
     initials = "".join(w[0] for w in words[:2]).upper() or (ticker or "?")[:2].upper()
     colour = LOGO_COLOURS[int(hashlib.md5((ticker or name or "").encode()).hexdigest(), 16) % len(LOGO_COLOURS)]
-    return f'<span class="logo{" lg" if large else ""}" style="background:{colour}" aria-hidden="true">{esc(initials)}</span>'
+    urls = _logo_urls()
+    url = (urls.get("pair", {}).get((market, ticker)) if market else None) or urls.get("ticker", {}).get(ticker)
+    img = f'<img src="{esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer">' if url else ""
+    return (f'<span class="logo{" lg" if large else ""}{" has-img" if url else ""}" style="background:{colour}" '
+            f'aria-hidden="true">{esc(initials)}{img}</span>')
 
 
 def chip_html(key: str) -> str:
@@ -248,7 +307,7 @@ def filing_row_html(f: dict, show_company: bool = True, is_new: bool = False, co
     dot = '<span class="fl-new" title="Added in the last 2 hours"></span>' if is_new else ""
     star = '<span class="fl-star" title="Starred">★</span>' if starred else ""
     where = f'<span class="fl-tk">{esc(country)}</span>' if country else ""
-    company = (f'<div class="fl-co">{dot}{star}{logo_html(f["company_name"], f["ticker"])}{esc(f["company_name"])}'
+    company = (f'<div class="fl-co">{dot}{star}{logo_html(f["company_name"], f["ticker"], market=f.get("market"))}{esc(f["company_name"])}'
                f'<span class="fl-tk">{esc(f["ticker"])}</span>{where}</div>' if show_company else "")
     lead = "" if show_company else dot + star
     flag = '<span class="fl-flag">Price sensitive</span>' if f.get("price_sensitive") else ""

@@ -6,6 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, insert, select, update
+from datetime import date as _date, timedelta as _td
 
 from core.db import custom_symbols, get_engine, holdings, price_alerts, targets, transactions, utcnow, watchlist
 from sources import get_source
@@ -105,6 +106,75 @@ def add_transaction(user_id: int, market: str, ticker: str, kind: str, tx_date, 
     with get_engine().begin() as conn:
         conn.execute(insert(transactions).values(user_id=user_id, market=market, ticker=ticker, kind=kind, tx_date=tx_date,
                                                  shares=shares, price=price, fees=fees, created_at=utcnow()))
+    return None
+
+
+def update_transaction(user_id: int, tx_id: int, kind: str, tx_date, shares: float, price: float,
+                       fees: float = 0.0) -> str | None:
+    """Change a transaction. Checks the edited history never sells more shares than were held."""
+    if kind not in ("buy", "sell") or shares <= 0 or price < 0 or fees < 0:
+        return "Enter a positive number of shares, and a price and fees of zero or more."
+    from .portfolio_calc import positions
+    txs = list_transactions(user_id)
+    old = next((t for t in txs if t["id"] == tx_id), None)
+    if not old:
+        return "That transaction no longer exists."
+    edited = [t if t["id"] != tx_id else {**t, "kind": kind, "tx_date": tx_date, "shares": shares, "price": price,
+                                           "fees": fees} for t in txs]
+    key = (old["market"], old["ticker"])
+    running = 0.0
+    for t in sorted((t for t in edited if (t["market"], t["ticker"]) == key), key=lambda t: (t["tx_date"], t["id"])):
+        running += t["shares"] if t["kind"] == "buy" else -t["shares"]
+        if running < -1e-9:
+            return f"With this change you'd be selling more shares than you held on {t['tx_date']:%d %b %Y}."
+    with get_engine().begin() as conn:
+        conn.execute(update(transactions).where(transactions.c.id == tx_id, transactions.c.user_id == user_id)
+                     .values(kind=kind, tx_date=tx_date, shares=shares, price=price, fees=fees))
+    return None
+
+
+def market_close(market: str, ticker: str, day) -> float | None:
+    """The closing price on (or just before) a date, in the holding's currency."""
+    hist = price_history(market, ticker, years=max(1, min(10, (_date.today() - day).days // 365 + 1)))
+    before = [v for d, v in hist if d <= day]
+    return before[-1] if before else (hist[0][1] if hist else None)
+
+
+def check_price(market: str, ticker: str, day, price: float) -> tuple[float, str | None]:
+    """Compare an entered price with the market close. Returns (price to use, note or warning).
+    Israeli prices typed in agorot (about 100x) are converted to shekels automatically."""
+    close = market_close(market, ticker, day)
+    if not close or price <= 0:
+        return price, None
+    ratio = price / close
+    if market == "IL" and 50 <= ratio <= 200:
+        return price / 100, (f"Converted {price:,.4g} agorot to {price / 100:,.4g} shekels (TASE shows prices in agorot).")
+    if ratio > 3 or ratio < 1 / 3:
+        return price, (f"The market closed at about {close:,.4g} on that date, so {price:,.4g} looks off. "
+                       f"Check the price is per share and in {currency_for(market, ticker)}.")
+    return price, None
+
+
+def update_transaction(user_id: int, tx_id: int, kind: str, tx_date, shares: float, price: float,
+                       fees: float = 0.0) -> str | None:
+    if kind not in ("buy", "sell") or shares <= 0 or price < 0 or fees < 0:
+        return "Enter a positive number of shares, and a price and fees of zero or more."
+    txs = list_transactions(user_id)
+    current = next((t for t in txs if t["id"] == tx_id), None)
+    if not current:
+        return "That transaction no longer exists."
+    from .portfolio_calc import positions
+    trial = [t for t in txs if t["id"] != tx_id] + [{**current, "kind": kind, "tx_date": tx_date, "shares": shares,
+                                                    "price": price, "fees": fees}]
+    key = (current["market"], current["ticker"])
+    for day in sorted({t["tx_date"] for t in trial if (t["market"], t["ticker"]) == key}):
+        sells = sum(t["shares"] for t in trial if (t["market"], t["ticker"]) == key and t["kind"] == "sell" and t["tx_date"] == day)
+        held_before = positions([t for t in trial if t["tx_date"] < day or (t["tx_date"] == day and t["kind"] == "buy")]).get(key, {}).get("shares", 0)
+        if sells > held_before + 1e-9:
+            return "That change would mean selling more shares than you held at the time."
+    with get_engine().begin() as conn:
+        conn.execute(update(transactions).where(transactions.c.id == tx_id, transactions.c.user_id == user_id)
+                     .values(kind=kind, tx_date=tx_date, shares=shares, price=price, fees=fees))
     return None
 
 

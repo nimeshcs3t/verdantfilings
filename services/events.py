@@ -137,3 +137,34 @@ def upcoming(pairs: list[tuple[str, str]], days: int = 60) -> list[dict]:
             seen.add(key)
             out.append(dict(r))
     return out
+
+
+def between(pairs: list[tuple[str, str]], start: date, end: date) -> list[dict]:
+    """Events (past or future) between two dates for these companies, without duplicates."""
+    if not pairs:
+        return []
+    cond = or_(*[and_(events.c.market == m, events.c.ticker == t) for m, t in pairs])
+    with get_engine().connect() as conn:
+        rows = conn.execute(select(events, filings.c.company_name, filings.c.url, filings.c.title_en)
+                            .select_from(events.join(filings, filings.c.uid == events.c.uid))
+                            .where(cond, events.c.event_date >= start, events.c.event_date <= end)
+                            .order_by(events.c.event_date)).mappings().all()
+    seen, out = set(), []
+    for r in rows:
+        key = (r["market"], r["ticker"], r["event_date"], r["label"].lower())
+        if key not in seen:
+            seen.add(key)
+            out.append(dict(r))
+    return out
+
+
+def kind(label: str) -> str:
+    """Group an event label for colours and filters: results, meeting, dividend or other."""
+    low = (label or "").lower()
+    if any(w in low for w in ("result", "earning", "financial statement", "report date")):
+        return "results"
+    if any(w in low for w in ("meeting", "agm", "egm", "vote")):
+        return "meeting"
+    if any(w in low for w in ("dividend", "record", "payment", "ex-", "distribution")):
+        return "dividend"
+    return "other"

@@ -2,8 +2,10 @@ from datetime import timedelta
 
 import streamlit as st
 
-from core.ui import html_block, page_header
-from services import personal
+import re
+
+from core.ui import esc, html_block, page_header
+from services import ask, personal, portfolio as portfolio_svc, watch
 from services.classify import ORDER, label
 from services.search import search, to_csv
 from sources import configured_sources, get_source, visible_sources
@@ -15,7 +17,8 @@ PERIODS = {"Last 7 days": 7, "Last 30 days": 30, "Last 90 days": 90, "Last year"
 
 def page() -> None:
     user = st.session_state["user"]
-    page_header("Search", "Every filing stored for the companies anyone here follows.")
+    page_header("Search", "Ask a question across your filings, or search every stored filing.")
+    ask_box(user)
     c1, c2, c3 = st.columns([2.2, 1, 1], vertical_alignment="bottom")
     text = c1.text_input("Words", placeholder="e.g. buyback, rights offering, Samsung", key="s-text")
     markets = {s.country: s.market for s in visible_sources(user)}
@@ -49,3 +52,53 @@ def page() -> None:
                       hist=hist.get((r["market"], r["ticker"])), stars=stars)
     if len(rows) > 150:
         st.caption("Showing the first 150 here. The CSV has them all.")
+
+
+ASK_PERIODS = {"Last 7 days": 7, "Last 30 days": 30, "Last 90 days": 90, "Last year": 365}
+
+
+def ask_box(user: dict) -> None:
+    with st.container(border=True):
+        st.markdown("**Ask your filings**")
+        if not ask.available():
+            st.caption("Add a Gemini key (GEMINI_API_KEY) in the app secrets to ask questions across filings.")
+            return
+        with st.form("ask-many", border=False):
+            question = st.text_input("Question", placeholder="e.g. What did my companies announce about buybacks this month?",
+                                     label_visibility="collapsed")
+            c1, c2, c3 = st.columns([1, 1.3, 0.6], vertical_alignment="bottom")
+            period = c1.selectbox("Period", list(ASK_PERIODS), index=1)
+            scope = c2.selectbox("Companies", ["My watchlist and holdings", "All companies tracked here"])
+            asked = c3.form_submit_button("Ask", type="primary", width="stretch")
+        if asked and question.strip():
+            pairs = None
+            if scope.startswith("My"):
+                pairs = {(w["market"], w["ticker"]) for w in watch.get_watchlist(user["id"])}
+                pairs |= {(h["market"], h["ticker"]) for h in portfolio_svc.current_holdings(user["id"])}
+            since = max(s.today() for s in configured_sources()) - timedelta(days=ASK_PERIODS[period])
+            rows = [r for r in search("", None, since, limit=2000)
+                    if pairs is None or (r["market"], r["ticker"]) in pairs]
+            visible = {s.market for s in visible_sources(user)}
+            rows = [r for r in rows if r["market"] in visible]
+            with st.spinner("Reading the filings"):
+                st.session_state["ask-result"] = ask.ask_filings(question, rows)
+        result = st.session_state.get("ask-result")
+        if result:
+            answer, used = result
+
+            def link(m):
+                i = int(m.group(1))
+                if 1 <= i <= len(used):
+                    return f'<a href="{esc(used[i - 1]["url"])}" target="_blank" rel="noopener noreferrer">[{i}]</a>'
+                return m.group(0)
+
+            body = re.sub(r"\[(\d{1,3})\]", link, esc(answer)).replace("\n", "<br>")
+            html_block(f'<div class="answer">{body}</div>')
+            cited = sorted({int(n) for n in re.findall(r"\[(\d{1,3})\]", answer) if 1 <= int(n) <= len(used)})
+            if cited:
+                st.caption("Sources")
+                html_block("".join(
+                    f'<div class="ev-row"><b>[{i}]</b> {used[i - 1]["filed_date"]:%d %b} {esc(used[i - 1]["company_name"])}: '
+                    f'<a href="{esc(used[i - 1]["url"])}" target="_blank" rel="noopener noreferrer">'
+                    f'{esc(used[i - 1]["title_en"])}</a></div>' for i in cited))
+            st.caption("AI answer from filing titles and overviews. Check the sources before relying on it.")

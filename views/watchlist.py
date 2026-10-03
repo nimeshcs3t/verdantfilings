@@ -36,7 +36,7 @@ def page() -> None:
         h = hist.get(pair) or []
         country = f'<span class="fl-tk">{esc(get_source(w["market"]).country)}</span>' if several else ""
         c1, c2, c3, c4, c5 = st.columns([3, 1.6, 1.4, 0.8, 0.9], vertical_alignment="center")
-        c1.markdown(f'<div class="fl-co">{logo_html(w["name_en"], w["ticker"])}{esc(w["name_en"])}'
+        c1.markdown(f'<div class="fl-co">{logo_html(w["name_en"], w["ticker"], market=w["market"])}{esc(w["name_en"])}'
                     f'<span class="fl-tk">{esc(w["ticker"])}</span>{country}</div>'
                     f'<div class="fl-orig ko" style="margin-left:33px">'
                     f'{esc(w["name_local"]) if w["name_local"] != w["name_en"] else ""}</div>', unsafe_allow_html=True)

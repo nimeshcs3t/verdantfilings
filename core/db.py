@@ -315,6 +315,22 @@ custom_symbols = Table(
     Column("country", String(40)),
 )
 
+company_logos = Table(
+    "company_logos", metadata,
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("url", Text),                    # None = no logo found (letter tile is used)
+    Column("checked_at", DateTime(timezone=True), default=utcnow),
+)
+
+company_sites = Table(
+    "company_sites", metadata,              # company websites, where a source lists one
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("url", Text),                    # None = not known (a web search link is shown instead)
+    Column("checked_at", DateTime(timezone=True), default=utcnow),
+)
+
 _engine: Engine | None = None
 _lock = threading.Lock()
 

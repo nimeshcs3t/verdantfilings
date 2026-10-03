@@ -61,7 +61,8 @@ def positions(txs: list[dict], until: date | None = None, convert=None) -> dict[
 def daily_values(txs: list[dict], prices: dict[tuple[str, str], Series], fx: dict[str, Series],
                  currency_of: dict[tuple[str, str], str], base: str, trading_days: list[date],
                  base_fx: Series | None = None) -> list[dict]:
-    """For each trading day from the first transaction: portfolio value and net money added, in the base currency."""
+    """For each trading day from the first transaction: portfolio value and money added, in the base currency.
+    `flow` is money at the actual trade prices; `flow_mkt` values the same trades at that day's closing prices."""
     if not txs:
         return []
     txs = sorted(txs, key=lambda t: (t["tx_date"], t.get("id") or 0))
@@ -80,20 +81,22 @@ def daily_values(txs: list[dict], prices: dict[tuple[str, str], Series], fx: dic
     held: dict[tuple[str, str], float] = {}
     out, i = [], 0
     for day in days:
-        flow = 0.0
+        flow, flow_mkt = 0.0, 0.0
         while i < len(txs) and txs[i]["tx_date"] <= day:
             t = txs[i]
             key = (t["market"], t["ticker"])
             cur = currency_of.get(key, "USD")
-            amount = t["shares"] * t["price"] + ((t.get("fees") or 0) if t["kind"] == "buy" else -(t.get("fees") or 0))
-            value = to_base(amount, cur, t["tx_date"])
+            fees = t.get("fees") or 0
+            close = prices[key].at(t["tx_date"]) if key in prices else None
             if t["kind"] == "buy":
                 held[key] = held.get(key, 0.0) + t["shares"]
-                flow += value or 0.0
+                flow += to_base(t["shares"] * t["price"] + fees, cur, t["tx_date"]) or 0.0
+                flow_mkt += to_base(t["shares"] * (close if close is not None else t["price"]), cur, day) or 0.0
             else:
                 sold = min(t["shares"], held.get(key, 0.0))
                 held[key] = held.get(key, 0.0) - sold
-                flow -= to_base(sold * t["price"] - (t.get("fees") or 0), cur, t["tx_date"]) or 0.0
+                flow -= to_base(sold * t["price"] - fees, cur, t["tx_date"]) or 0.0
+                flow_mkt -= to_base(sold * (close if close is not None else t["price"]), cur, day) or 0.0
             i += 1
         total, ok = 0.0, True
         for key, shares in held.items():
@@ -106,23 +109,28 @@ def daily_values(txs: list[dict], prices: dict[tuple[str, str], Series], fx: dic
                 break
             total += v
         if ok:
-            out.append({"date": day, "value": total, "flow": flow})
+            out.append({"date": day, "value": total, "flow": flow, "flow_mkt": flow_mkt})
     return out
 
 
 def twr_index(daily: list[dict]) -> list[tuple[date, float]]:
     """Cumulative time-weighted growth of 1 unit.
 
-    Buys and sells are valued at their actual trade price, so each day's return is
-    (value at close - money added) / previous close - 1. On the first day (or when almost nothing was held
-    before), the return runs from the trade price to the close instead."""
+    Each day's return is measured on the holdings already owned: (value at close - trades valued at close) /
+    previous close. New money joins at the closing price, so a mistyped trade price can't distort returns.
+    On the very first day the return runs from the trade price to the close, unless that gap is implausible."""
     index, prev, level = [], 0.0, 1.0
     for row in daily:
-        value, flow = row["value"], row["flow"]
-        if prev > 1e-9 and prev >= 0.01 * abs(flow):
-            level *= (value - flow) / prev
-        elif prev + flow > 1e-9:
-            level *= value / (prev + flow)
+        value = row["value"]
+        flow_mkt = row.get("flow_mkt", row["flow"])
+        if prev > 1e-9:
+            factor = (value - flow_mkt) / prev
+            if factor > 0:
+                level *= factor
+        elif row["flow"] > 1e-9:
+            first = value / row["flow"]
+            if 0.67 <= first <= 1.5:          # beyond this, the entered price is more likely a typo than a real move
+                level *= first
         index.append((row["date"], level))
         prev = value
     return index

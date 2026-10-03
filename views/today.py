@@ -5,7 +5,8 @@ import streamlit as st
 from core.config import direct_fetch
 from core.db import as_utc
 from core.ui import chip_html, esc, html_block, logo_html, long_date, page_header, relative_time
-from services import events as events_svc, personal, watch
+from services import events as events_svc, personal, portfolio as portfolio_svc, watch
+from services.classify import is_major
 from services.classify import ORDER, categorize, label
 from services.pipeline import filings_for, sync_company
 from sources import get_source
@@ -62,6 +63,7 @@ def page() -> None:
     else:
         subtitle = f"{len(rows)} filings from {source_txt}, {period.lower()}."
     page_header(long_date(today), subtitle)
+    dashboard(user, all_wl)
 
     main, side = st.columns([2.2, 1], gap="large")
     with main:
@@ -105,7 +107,7 @@ def page() -> None:
             for (m, t), items in groups.items():
                 name = items[0]["company_name"]
                 country = f'<span class="fl-tk">{esc(get_source(m).country)}</span>' if label_country else ""
-                html_block(f'<div class="group-head">{logo_html(name, t)}{esc(name)}<span class="fl-tk">{esc(t)}</span>'
+                html_block(f'<div class="group-head">{logo_html(name, t, market=m)}{esc(name)}<span class="fl-tk">{esc(t)}</span>'
                            f'{country}<span class="count">{len(items)} filing{"s" if len(items) != 1 else ""}</span></div>')
                 for r in items:
                     render_filing(r, key="today", show_company=False, hist=hist.get((m, t)), stars=stars)
@@ -128,3 +130,34 @@ def page() -> None:
             items += cached_english_news(w["name_en"], w["ticker"], 3)[:2]
         items.sort(key=lambda n: n["published"].timestamp() if n.get("published") else 0, reverse=True)
         render_news(items[:10])
+
+
+def dashboard(user: dict, wl: list[dict]) -> None:
+    """Four tiles: portfolio, filings today, major filings today, and dates coming up this week."""
+    from .portfolio import MASK, quick_summary
+    tiles = []
+    txs = portfolio_svc.list_transactions(user["id"])
+    if txs:
+        base = portfolio_svc.home_currency(user["id"]) if st.session_state.get("pf-mode") == "Home currency" else "USD"
+        signature = f"{len(txs)}:{max(t['id'] for t in txs)}:{max(str(t['tx_date']) for t in txs)}"
+        s = quick_summary(user["id"], base, signature)
+        if s:
+            hidden = portfolio_svc.hide_amounts(user["id"])
+            value = f"{MASK} {base}" if hidden else f"{s['value']:,.0f} {base}"
+            pct = s["today_pct"]
+            move = "" if pct is None else f'<span class="mv {"up" if pct > 0 else "down" if pct < 0 else "flat"}">{pct * 100:+.2f}%</span>'
+            amount = "" if hidden or s["today"] is None else f" ({s['today']:+,.0f})"
+            tiles.append(("Portfolio", value, f"Today {move}{esc(amount)}"))
+    todays = []
+    for m in {w["market"] for w in wl}:
+        todays += filings_for([(w["market"], w["ticker"]) for w in wl if w["market"] == m], get_source(m).today())
+    major = [r for r in todays if is_major(r)]
+    companies = len({(r["market"], r["ticker"]) for r in todays})
+    tiles.append(("Filings today", f"{len(todays)}", f"from {companies} compan{'y' if companies == 1 else 'ies'}"))
+    tiles.append(("Major today", f"{len(major)}", esc(major[0]["company_name"] + ": " + major[0]["title_en"])[:60] if major else "results, deals, dividends..."))
+    soon = events_svc.upcoming([(w["market"], w["ticker"]) for w in wl], days=7)
+    nxt = f'{soon[0]["event_date"]:%d %b} {esc(soon[0]["ticker"])} {esc(soon[0]["label"])}' if soon else "nothing announced"
+    tiles.append(("Next 7 days", f"{len(soon)} date{'s' if len(soon) != 1 else ''}", nxt))
+    html_block('<div class="dash">' + "".join(
+        f'<div class="stat"><div class="k">{k}</div><div class="v">{esc(v)}</div><div class="sub">{sub}</div></div>'
+        for k, v, sub in tiles) + "</div>")

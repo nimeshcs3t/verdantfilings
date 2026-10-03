@@ -73,11 +73,11 @@ def page() -> None:
     local = comp["name_local"] if comp["name_local"] != comp["name_en"] else ""
     meta = "".join(f"<span>{esc(x)}</span>" for x in (local, comp["ticker"], f"{src.country}, {src.regulator}") if x)
     last = (f'<span>{hist[-1][1]:,.2f} {prices.move_html(prices.last_move(hist))}</span>' if hist else "")
-    html_block(f'<div class="co-head">{logo_html(comp["name_en"], comp["ticker"], large=True)}'
+    html_block(f'<div class="co-head">{logo_html(comp["name_en"], comp["ticker"], large=True, market=market)}'
                f'<h1 class="co-name">{esc(comp["name_en"])}</h1></div><div class="co-meta ko">{meta}{last}</div>')
 
     watching = watch.is_watching(user["id"], market, comp["ticker"])
-    b1, b2, *_ = st.columns([1.1, 1.1, 3])
+    b1, b2, b3, *_ = st.columns([1.1, 1.1, 1, 2])
     if watching:
         if b1.button("Remove from watchlist", width="stretch"):
             watch.remove(user["id"], market, comp["ticker"])
@@ -92,6 +92,14 @@ def page() -> None:
     company_obj = Company(market, comp["ticker"], comp["source_id"], comp["name_local"], comp["name_en"])
     for label, url in src.external_links(company_obj)[:1]:
         b2.link_button(label, url, width="stretch")
+    from urllib.parse import quote_plus
+    from services.logos import website
+    site = website(market, comp["ticker"])
+    if site:
+        b3.link_button("Website", site, width="stretch", icon=":material/language:")
+    else:
+        b3.link_button("Find website", "https://www.google.com/search?q=" + quote_plus(f'{comp["name_en"]} official website'),
+                       width="stretch", icon=":material/travel_explore:")
 
     rows = filings_for([(market, comp["ticker"])], src.today() - timedelta(days=180), limit=300)
     for r in rows:
@@ -262,11 +270,11 @@ def insiders_tab(market: str, ticker: str, filings_rows: list[dict]) -> None:
             after = f'{r["after"]:,.0f}' if r.get("after") is not None else ""
             kind = insiders.CODE_LABEL.get(r["code"], r["code"])
             lines.append(f'<tr><td>{r["tx_date"]:%d %b %Y}</td><td class="ko">{esc(r["person"])}</td>'
-                         f'<td>{esc(r["role"])}</td><td>{esc(kind)}</td><td class="num">{(r["shares"] or 0):,.0f}</td>'
-                         f'<td class="num">{price}</td><td class="num">{after}</td></tr>')
+                         f'<td class="opt">{esc(r["role"])}</td><td>{esc(kind)}</td><td class="num">{(r["shares"] or 0):,.0f}</td>'
+                         f'<td class="num">{price}</td><td class="num opt">{after}</td></tr>')
         body = "".join(lines)
-        html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Date</th><th>Who</th><th>Role</th><th>Type</th>'
-                   f'<th class="num">Shares</th><th class="num">Price</th><th class="num">Holds after</th></tr>{body}</table></div>')
+        html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Date</th><th>Who</th><th class="opt">Role</th><th>Type</th>'
+                   f'<th class="num">Shares</th><th class="num">Price</th><th class="num opt">Holds after</th></tr>{body}</table></div>')
         st.caption("Last 180 days. " + ("From Form 4 filings." if market == "US" else "From DART executive and major shareholder reports."))
         return
     insider_filings = [r for r in filings_rows if r.get("category") in ("insider", "ownership")]

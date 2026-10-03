@@ -6,55 +6,34 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install requests
-      - name: Report and company list fields
+      - run: pip install -r requirements.txt
+      - name: Compare MAYA with what the app keeps
+        env:
+          ENABLE_MAYA: "true"
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python - <<'EOF'
-          import json
-          import requests
+          from datetime import timedelta
+          from sources.il_maya import MayaWebSource, REPORTS
+          from sources.base import Company
 
-          s = requests.Session()
-          s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-                            "Accept-Language": "en-US,en;q=0.9", "Referer": "https://maya.tase.co.il/",
-                            "Origin": "https://maya.tase.co.il", "X-Maya-With": "allow"})
+          src = MayaWebSource()
+          print("=== What MAYA sends for SMSH (company 2536), page 1 ===")
+          data = src._get(REPORTS, {"companyId": "2536"}, "https://maya.tase.co.il/")
+          reps = data.get("Reports") or []
+          print("TotalPages:", data.get("TotalPages"), "| reports on page:", len(reps),
+                "| DateFrom:", data.get("DateFrom"), "| DateTo:", data.get("DateTo"))
+          for r in reps[:30]:
+              print(" ", str(r.get("PubDate"))[:19], r.get("RptCode"), "|", (r.get("Subject") or "")[:70])
 
-          print("=== Company reports, page 1 ===")
-          r = s.get("https://mayaapi.tase.co.il/api/company/reports", params={"companyId": 604}, timeout=30)
-          d = r.json()
-          print("status", r.status_code, "| keys:", [k for k in d if k != "Reports"], "| TotalPages", d.get("TotalPages"),
-                "| reports on this page:", len(d.get("Reports") or []))
-          reps = d.get("Reports") or []
-          if reps:
-              print("report fields:", list(reps[0].keys()))
-              for rep in reps[:3]:
-                  print("sample:", json.dumps(rep, ensure_ascii=False)[:700])
-
-          print("\n=== Company reports, page 2 ===")
-          r2 = s.get("https://mayaapi.tase.co.il/api/company/reports", params={"companyId": 604, "page": 2}, timeout=30)
-          reps2 = (r2.json().get("Reports") or []) if r2.status_code == 200 else []
-          print("status", r2.status_code, "| reports:", len(reps2), "| same as page 1:",
-                bool(reps and reps2 and json.dumps(reps2[0]) == json.dumps(reps[0])))
-
-          print("\n=== Company list ===")
-          r3 = s.get("https://api.tase.co.il/api/content/searchentities", params={"lang": 1},
-                     headers={"Referer": "https://www.tase.co.il/"}, timeout=60)
-          print("status", r3.status_code, "|", r3.headers.get("content-type"))
-          try:
-              items = r3.json()
-              items = items if isinstance(items, list) else items.get("Items") or items
-              print("entries:", len(items))
-              if isinstance(items, list) and items:
-                  print("fields:", list(items[0].keys()))
-                  types = {}
-                  for it in items:
-                      types[it.get("Type")] = types.get(it.get("Type"), 0) + 1
-                  print("count by Type:", types)
-                  leumi = [it for it in items if "LEUMI" in json.dumps(it).upper()][:3]
-                  for it in leumi:
-                      print("leumi-like:", json.dumps(it, ensure_ascii=False)[:300])
-          except ValueError:
-              print("not JSON:", r3.text[:300])
+          print("\n=== What the app keeps from that (last 180 days) ===")
+          smsh = Company("IL", "SMSH", "2536", "", "SMSH")
+          kept = src.list_filings(smsh, src.today() - timedelta(days=180), src.today())
+          print("kept:", len(kept))
+          for f in kept[:30]:
+              print(" ", f.filed_date, f.uid, "|", (f.title_en or f.title_local)[:70])
           EOF

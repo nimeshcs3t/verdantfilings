@@ -11,29 +11,34 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Compare MAYA with what the app keeps
+      - name: Find the company's own reports
         env:
           ENABLE_MAYA: "true"
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python - <<'EOF'
-          from datetime import timedelta
+          import json
           from sources.il_maya import MayaWebSource, REPORTS
-          from sources.base import Company
 
           src = MayaWebSource()
-          print("=== What MAYA sends for SMSH (company 2536), page 1 ===")
-          data = src._get(REPORTS, {"companyId": "2536"}, "https://maya.tase.co.il/")
-          reps = data.get("Reports") or []
-          print("TotalPages:", data.get("TotalPages"), "| reports on page:", len(reps),
-                "| DateFrom:", data.get("DateFrom"), "| DateTo:", data.get("DateTo"))
-          for r in reps[:30]:
-              print(" ", str(r.get("PubDate"))[:19], r.get("RptCode"), "|", (r.get("Subject") or "")[:70])
 
-          print("\n=== What the app keeps from that (last 180 days) ===")
-          smsh = Company("IL", "SMSH", "2536", "", "SMSH")
-          kept = src.list_filings(smsh, src.today() - timedelta(days=180), src.today())
-          print("kept:", len(kept))
-          for f in kept[:30]:
-              print(" ", f.filed_date, f.uid, "|", (f.title_en or f.title_local)[:70])
+          def show(label, params, language):
+              print(f"\n=== {label} ===")
+              src._get(REPORTS, {"companyId": "2536"}, "https://maya.tase.co.il/")   # opens the session
+              src._session.headers["Accept-Language"] = language
+              try:
+                  d = src._get(REPORTS, {"companyId": "2536", **params}, "https://maya.tase.co.il/")
+              except Exception as e:
+                  print("refused:", type(e).__name__, e); return False
+              reps = d.get("Reports") or []
+              print("ViewType:", d.get("ViewType"), "| TotalPages:", d.get("TotalPages"), "| reports:", len(reps))
+              for r in reps[:10]:
+                  print(" ", str(r.get("PubDate"))[:19], r.get("RptCode"), "|", (r.get("Subject") or "")[:70])
+              return True
+
+          ok = show("Hebrew view", {}, "he-IL,he;q=0.9")
+          if ok:
+              ok = show("Hebrew view, viewType 1", {"viewType": 1}, "he-IL,he;q=0.9")
+          if ok:
+              show("English view, viewType 1", {"viewType": 1}, "en-US,en;q=0.9")
           EOF

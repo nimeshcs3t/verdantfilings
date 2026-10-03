@@ -71,6 +71,7 @@ class NewConnectSource(FilingSource):
         self._scan: tuple[float, date, list[dict]] | None = None
         self._lock = threading.Lock()
         self._last_call = 0.0
+        self.websites: dict[str, str] = {}      # ISIN -> website, seen on the company page
 
     # ---- plumbing -------------------------------------------------------
     def is_configured(self) -> bool:
@@ -243,6 +244,14 @@ class NewConnectSource(FilingSource):
         urls = []
         try:
             soup = BeautifulSoup(self._call("GET", COMPANY_PAGE.format(isin)).text, "html.parser")
+            for a in soup.find_all("a", href=re.compile(r"^https?://")):
+                href = a["href"].lower()
+                if not any(d in href for d in ("newconnect.pl", "gpw.pl", "gpwbenchmark", "facebook", "twitter",
+                                               "linkedin", "youtube", "instagram", "google", "x.com")):
+                    text = a.get_text(" ", strip=True).lower()
+                    if "www" in text or "www" in href or text.startswith("http"):
+                        self.websites[isin] = a["href"]
+                        break
             for a in soup.find_all("a", attrs={"data-href": re.compile(r"start=reportsTab")}):
                 href = a["data-href"]
                 system = "ESPI" if "type=e" in href else "EBI"

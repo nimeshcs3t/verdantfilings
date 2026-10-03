@@ -200,3 +200,57 @@ def rebalance(rows: list[dict], targets: dict[tuple[str, str], float], new_cash:
         out.append({**r, "current": current, "target": target / 100, "trade_value": trade_value,
                     "trade_shares": (trade_value / per_share) if per_share else 0.0})
     return out
+
+
+# ---- money-weighted returns ---------------------------------------------------------------------------
+def shadow_benchmark(daily: list[dict], bench: Series) -> list[dict]:
+    """The same money, on the same days, put into the benchmark instead: buys add units, sells remove them."""
+    units, out = 0.0, []
+    for row in daily:
+        price = bench.at(row["date"])
+        if not price:
+            continue
+        units = max(units + row["flow"] / price, 0.0)
+        out.append({"date": row["date"], "value": units * price, "flow": row["flow"]})
+    return out
+
+
+def money_series(daily: list[dict], start: date) -> list[tuple[date, float]]:
+    """Return on your money from `start` to each later day:
+    gain in the period / (value at the start + money added in the period). For the whole history this equals
+    total gain / total invested, matching the Total gain figure."""
+    before = [r for r in daily if r["date"] < start]
+    v0 = before[-1]["value"] if before else 0.0
+    net, added, out = 0.0, 0.0, []
+    for r in daily:
+        if r["date"] < start:
+            continue
+        net += r["flow"]
+        added += max(r["flow"], 0.0)
+        base = v0 + added
+        if base > 1e-9:
+            out.append((r["date"], (r["value"] - v0 - net) / base))
+    return out
+
+
+def money_weighted_returns(daily: list[dict], bench_daily: list[dict] | None = None) -> list[dict]:
+    """Money-weighted return for each standard period, and the same for the benchmark bought with the same money."""
+    if not daily:
+        return []
+    first, end = daily[0]["date"], daily[-1]["date"]
+    out = []
+    for label, spec in PERIODS:
+        if spec is None:
+            prior = [r["date"] for r in daily if r["date"] < end]
+            start = prior[-1] + timedelta(days=1) if prior else end
+        else:
+            start = _start_for(label, spec, end, first) + timedelta(days=1)
+        partial = start < first
+        start = max(start, first)
+
+        def last(series):
+            pts = money_series(series, start) if series else []
+            return pts[-1][1] if pts else None
+        out.append({"label": label, "portfolio": last(daily), "benchmark": last(bench_daily) if bench_daily else None,
+                    "partial": partial})
+    return out

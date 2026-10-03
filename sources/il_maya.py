@@ -55,6 +55,7 @@ class MayaWebSource(FilingSource):
         self._listing_at = 0.0
         self._lock = threading.Lock()
         self._last_call = 0.0
+        self.websites: dict[str, str] = {}      # company id -> website, seen in report data
 
     # ---- plumbing -------------------------------------------------------
     def is_configured(self) -> bool:
@@ -141,6 +142,9 @@ class MayaWebSource(FilingSource):
             reports = data.get("Reports") or []
             oldest = None
             for rep in reports:
+                site = ((rep.get("FormalCompanyData") or {}).get("URL") or "").strip()
+                if site:
+                    self.websites[company.source_id] = site
                 try:
                     published = datetime.fromisoformat(str(rep.get("PubDate"))[:19]).date()
                 except ValueError:

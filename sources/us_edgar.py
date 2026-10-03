@@ -160,6 +160,7 @@ class EdgarSource(FilingSource):
         self._tickers_at = 0.0
         self._lock = threading.Lock()
         self._last_call = 0.0
+        self.websites: dict[str, str] = {}      # CIK -> website, seen in SEC submissions data
 
     # ---- plumbing -------------------------------------------------------
     def is_configured(self) -> bool:
@@ -230,7 +231,11 @@ class EdgarSource(FilingSource):
 
     def list_filings(self, company: Company, start: date, end: date) -> list[Filing]:
         cik = int(company.source_id)
-        recent = self._get(SUBMISSIONS.format(cik)).json().get("filings", {}).get("recent", {})
+        data = self._get(SUBMISSIONS.format(cik)).json()
+        site = (data.get("website") or data.get("investorWebsite") or "").strip()
+        if site:
+            self.websites[str(cik)] = site
+        recent = data.get("filings", {}).get("recent", {})
         excluded = {f.strip().upper() for f in str(get_secret("SEC_EXCLUDE_FORMS", DEFAULT_EXCLUDE)).split(",") if f.strip()}
         out = []
         n = len(recent.get("accessionNumber", []))

@@ -74,7 +74,7 @@ def notify_pending() -> int:
                 prefs = members.get(user_id)
                 if prefs and prefs["alert_mode"] == "instant" and wants(prefs, level, row):
                     chats.add(prefs["chat"])
-            if channel:
+            if channel and not getattr(src, "admin_only", False):
                 chats.add(channel)
             message = telegram.format_filing(row)
             for chat in chats:

@@ -50,7 +50,7 @@ def history(market: str, ticker: str, years: int = 1) -> list[tuple[date, float]
         try:
             data = _yahoo(f"{ticker}{suffix}", years)
             if len(data) > 5:
-                return data
+                return [(d, v / 100) for d, v in data] if market == "IL" else data   # agorot -> shekels
         except Exception:
             continue
     if market in STOOQ:

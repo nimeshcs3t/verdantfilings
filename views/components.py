@@ -13,7 +13,7 @@ from core.config import direct_fetch
 from services import ask, github, news, personal, prices, watch
 from services.classify import categorize
 from services.pipeline import enrich_filing, get_company, is_queued, listings_ready, search_companies
-from sources import configured_sources, get_source
+from sources import configured_sources, get_source, visible_sources
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -94,7 +94,7 @@ def _show_enriched(f: dict) -> None:
 
 
 def add_company_form(user: dict, key: str = "add") -> None:
-    sources = configured_sources()
+    sources = visible_sources(user)
     if not sources:
         st.error("No regulator is connected yet. Add DART_API_KEY to the app secrets.")
         return

@@ -6,7 +6,7 @@ from core.auth import change_password, update_user
 from core.session import logout
 from core.ui import esc, html_block, page_header
 from services import personal, telegram
-from sources import configured_sources
+from sources import configured_sources, visible_sources
 
 TIMEZONES = ["UTC", "Asia/Seoul", "Asia/Tokyo", "Asia/Kolkata", "Asia/Singapore", "Asia/Hong_Kong", "Asia/Dubai",
              "Asia/Jerusalem", "Australia/Sydney", "Europe/London", "Europe/Warsaw", "Europe/Paris",
@@ -119,7 +119,7 @@ def keyword_settings(user: dict) -> None:
     st.caption("Get a Telegram message when any filing title contains a word, even from companies you don't follow "
                "(Korea, USA, Poland and Japan are checked market-wide). Write keywords in English; they're matched "
                "in each market's language too.")
-    markets = {"All countries": "*", **{s.country: s.market for s in configured_sources()}}
+    markets = {"All countries": "*", **{s.country: s.market for s in visible_sources(user)}}
     with st.form("add-keyword", clear_on_submit=True, border=False):
         c1, c2, c3 = st.columns([2, 1.2, 0.8], vertical_alignment="bottom")
         word = c1.text_input("Keyword", placeholder="e.g. buyback, acquisition, rights offering")

@@ -8,7 +8,7 @@ from core.ui import esc, html_block, logo_html, page_header
 from services import portfolio, prices, watch
 from services.pipeline import filings_for, get_company, search_companies
 from services.portfolio_calc import PERIODS, Series, allocation, daily_values, period_returns, positions, rebalance, twr_index
-from sources import configured_sources, get_source
+from sources import configured_sources, get_source, visible_sources
 
 from .portfolio_charts import donut_svg, performance_svg
 
@@ -312,7 +312,7 @@ def _resolve(market: str, query: str) -> dict | None:
 
 def transactions_tab(user: dict, txs: list[dict]) -> None:
     uid = user["id"]
-    markets = {**{s.country: s.market for s in configured_sources()}, OTHER_LABEL: portfolio.OTHER}
+    markets = {**{s.country: s.market for s in visible_sources(user)}, OTHER_LABEL: portfolio.OTHER}
     with st.form("tx-add", clear_on_submit=True, border=True):
         st.markdown("**Add a buy or sell**")
         c1, c2, c3 = st.columns([1.1, 1.6, 0.9])

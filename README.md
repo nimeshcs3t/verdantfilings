@@ -132,6 +132,14 @@ reports, tender offers, buyback reports). Exchange announcements on TDnet (earni
 no free API and aren't included. EDINET data is under the Public Data License 1.0: commercial use is
 allowed with the credit line the app shows next to Japanese filings.
 
+## Israel (MAYA website, personal use)
+
+With `ENABLE_MAYA = "true"` (GitHub Actions secrets and Streamlit secrets), Israeli company reports are read from
+the public MAYA website: the company list once a day and one request per watched Israeli company per run. English
+report subjects come from MAYA. It is unofficial and for personal use: Israel is visible to admin accounts only and
+never posted to the public Telegram channel. If MAYA ever refuses a request, Israel pauses for 24 hours (shown as a
+warning on the Admin health panel) and does not retry. Adding TASE_API_KEY switches to the official paid feed below.
+
 ## Israel (TASE MAYA)
 
 1. Create an account at https://datahub.tase.co.il, subscribe to "Market Announcements feed (MAYA)"

@@ -6,7 +6,7 @@ from core.ui import html_block, page_header
 from services import personal
 from services.classify import ORDER, label
 from services.search import search, to_csv
-from sources import configured_sources, get_source
+from sources import configured_sources, get_source, visible_sources
 
 from .components import histories, render_filing
 
@@ -18,7 +18,7 @@ def page() -> None:
     page_header("Search", "Every filing stored for the companies anyone here follows.")
     c1, c2, c3 = st.columns([2.2, 1, 1], vertical_alignment="bottom")
     text = c1.text_input("Words", placeholder="e.g. buyback, rights offering, Samsung", key="s-text")
-    markets = {s.country: s.market for s in configured_sources()}
+    markets = {s.country: s.market for s in visible_sources(user)}
     country = c2.selectbox("Country", ["All countries"] + list(markets), key="s-country")
     period = c3.selectbox("Period", list(PERIODS), index=2, key="s-period")
     c4, c5 = st.columns([3, 1], vertical_alignment="center")

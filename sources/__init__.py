@@ -10,6 +10,7 @@ Candidates for later:
 """
 from .au_asx import AsxSource
 from .base import Company, Filing, FilingSource, SourceBusy
+from .il_maya import MayaWebSource
 from .il_tase import TaseSource
 from .jp_edinet import EdinetSource
 from .kr_dart import DartSource
@@ -35,9 +36,20 @@ def configured_sources() -> list[FilingSource]:
     return [s for s in _REGISTRY.values() if s.is_configured()]
 
 
+def visible_sources(user: dict | None) -> list[FilingSource]:
+    """Markets a member can use. Personal-use sources (admin_only) are shown to admins only."""
+    is_admin = bool(user and user.get("role") == "admin")
+    return [s for s in configured_sources() if is_admin or not getattr(s, "admin_only", False)]
+
+
 register(DartSource())
 register(EdgarSource())
 register(AsxSource())
 register(NewConnectSource())
-register(TaseSource())
+# Israel: the paid TASE feed when a key is set, otherwise the public MAYA website (personal use).
+try:
+    from core.config import get_secret as _secret
+    register(TaseSource() if _secret("TASE_API_KEY") else MayaWebSource())
+except Exception:
+    register(MayaWebSource())
 register(EdinetSource())

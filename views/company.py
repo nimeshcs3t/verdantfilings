@@ -7,7 +7,7 @@ from core.config import direct_fetch
 from services import briefs, chat, events as events_svc, financials, github, insiders, personal, prices, watch
 from services.classify import ORDER, categorize, label as cat_label
 from services.pipeline import filings_for, get_company, search_companies, sync_company
-from sources import Company, configured_sources, get_source
+from sources import Company, configured_sources, get_source, visible_sources
 
 from .components import cached_english_news, cached_local_news, price_history, render_filing, render_news
 
@@ -164,7 +164,7 @@ def page() -> None:
 
 def _search_results(query: str) -> None:
     results = []
-    for src in configured_sources():
+    for src in visible_sources(st.session_state.get("user")):
         try:
             results += search_companies(src.market, query)
         except Exception:

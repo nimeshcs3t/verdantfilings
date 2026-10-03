@@ -10,8 +10,14 @@ Candidates for later:
 """
 from .au_asx import AsxSource
 from .base import Company, Filing, FilingSource, SourceBusy
+from .fr_amf import AmfSource
+from .hk_hkex import HkexSource
 from .il_maya import MayaWebSource
 from .il_tase import TaseSource
+from .no_oslo import OsloSource
+from .nordic import nordic_sources
+from .tw_twse import TwseSource
+from .uk_nsm import NsmSource
 from .jp_edinet import EdinetSource
 from .kr_dart import DartSource
 from .pl_newconnect import NewConnectSource
@@ -46,6 +52,13 @@ register(DartSource())
 register(EdgarSource())
 register(AsxSource())
 register(NewConnectSource())
+register(HkexSource())
+register(TwseSource())
+register(OsloSource())
+register(AmfSource())
+register(NsmSource())
+for _nordic in nordic_sources():
+    register(_nordic)
 # Israel: the paid TASE feed when a key is set, otherwise the public MAYA website (personal use).
 try:
     from core.config import get_secret as _secret

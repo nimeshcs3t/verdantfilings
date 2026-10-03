@@ -126,7 +126,7 @@ def add_company_form(user: dict, key: str = "add") -> None:
                     found = []
                 st.session_state[f"matches-{key}"] = [(c.market, c.ticker, c.name_en, c.name_local) for c in found]
             if not st.session_state[f"matches-{key}"]:
-                if not direct_fetch() and not listings_ready(market):
+                if not direct_fetch() and not get_source(market).resolve_in_app and not listings_ready(market):
                     st.warning("The company list is still loading. Try again in a few minutes.")
                 else:
                     st.warning(f"No listed company matches “{query.strip()}”.")

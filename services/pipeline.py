@@ -14,13 +14,13 @@ from sqlalchemy import and_, delete, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from core.config import direct_fetch, get_secret
-from core.db import (as_utc, companies, enrich_queue, filing_flags, filings, get_engine, listed_companies, users,
-                     utcnow, watchlist)
+from core.db import (as_utc, companies, enrich_queue, filing_flags, filing_texts, filings, get_engine, listed_companies,
+                     users, utcnow, watchlist)
 from sources import Company, SourceBusy, configured_sources, get_source
 
 from . import telegram
 from .summarize import summarize
-from .translate import glossary_or_cached, translate_lines, translate_text, translate_title
+from .translate import glossary_or_cached, looks_english, mostly_english, translate_lines, translate_text, translate_title
 
 log = logging.getLogger(__name__)
 SYNC_INTERVAL = timedelta(minutes=10)
@@ -39,8 +39,12 @@ def refresh_listings(force: bool = False) -> int:
         if not force and newest and utcnow() - as_utc(newest) < LISTING_MAX_AGE:
             continue
         now = utcnow()
-        rows = [dict(market=c.market, ticker=c.ticker, source_id=c.source_id, name_local=c.name_local,
-                     name_en=c.name_en, updated_at=now) for c in src.all_listed()]
+        try:
+            rows = [dict(market=c.market, ticker=c.ticker, source_id=c.source_id, name_local=c.name_local,
+                         name_en=c.name_en, updated_at=now) for c in src.all_listed()]
+        except Exception as exc:          # one market's list failing mustn't stop the others
+            log.warning("company list failed for %s: %s", src.market, exc)
+            continue
         if not rows:
             continue
         with get_engine().begin() as conn:
@@ -68,7 +72,7 @@ def search_companies(market: str, query: str, limit: int = 8) -> list[Company]:
     q = query.strip()
     if src is None or len(q) < 2:
         return []
-    if direct_fetch():
+    if direct_fetch() or src.resolve_in_app:
         return src.search(q, limit)
     ql = q.lower()
     with get_engine().connect() as conn:
@@ -95,7 +99,7 @@ def get_company(market: str, ticker: str, resolve: bool = True) -> dict | None:
         return dict(row)
     if not resolve:
         return None
-    comp = src.resolve(ticker) if direct_fetch() else _listed(market, ticker)
+    comp = src.resolve(ticker) if (direct_fetch() or src.resolve_in_app) else _listed(market, ticker)
     if comp is None:
         return None
     values = dict(market=comp.market, ticker=comp.ticker, source_id=comp.source_id,
@@ -134,7 +138,8 @@ def sync_company(market: str, ticker: str, force: bool = False) -> int:
         with get_engine().connect() as conn:
             existing = set(conn.execute(select(filings.c.uid).where(filings.c.uid.in_(uids))).scalars())
     fresh = [f for f in found if f.uid not in existing]
-    english = {f.uid: f.title_en or glossary_or_cached(f.title_local, src.source_lang) for f in fresh}
+    english = {f.uid: f.title_en or (f.title_local if looks_english(f.title_local) else None)
+               or glossary_or_cached(f.title_local, src.source_lang) for f in fresh}
     todo = [f for f in fresh if not english[f.uid]]
     for i in range(0, len(todo), 40):          # translate in batches: fewer requests to the translators
         batch = todo[i:i + 40]
@@ -151,6 +156,8 @@ def sync_company(market: str, ticker: str, force: bool = False) -> int:
                 conn.execute(insert(filings).values(**row))
                 if f.price_sensitive:
                     conn.execute(insert(filing_flags).values(uid=f.uid, price_sensitive=True))
+                if f.body:
+                    conn.execute(insert(filing_texts).values(uid=f.uid, body=f.body[:60000]))
             new += 1
         except IntegrityError:
             pass
@@ -190,17 +197,20 @@ def enrich_filing(uid: str, force: bool = False) -> dict | None:
         row["enrich_pending"] = True
         return row
     src = get_source(row["market"])
-    try:
-        text = src.fetch_document_text(uid)
-    except Exception as exc:
-        log.warning("document fetch failed for %s: %s", uid, exc)
-        text = ""
+    with get_engine().connect() as conn:
+        text = conn.execute(select(filing_texts.c.body).where(filing_texts.c.uid == uid)).scalar() or ""
+    if not text:
+        try:
+            text = src.fetch_document_text(uid)
+        except Exception as exc:
+            log.warning("document fetch failed for %s: %s", uid, exc)
+            text = ""
     if not text:
         row["summary_en"] = None
         row["enrich_error"] = "The regulator didn't return the document text. Open the original filing instead."
         return row
     limit = int(get_secret("BODY_TRANSLATE_CHARS", 6000))
-    body_en = translate_text(text[:limit], src.source_lang)
+    body_en = text[:limit] if src.source_lang != "en" and mostly_english(text) else translate_text(text[:limit], src.source_lang)
     summary = summarize(text, body_en, row["title_en"], row["company_name"])
     with get_engine().begin() as conn:
         conn.execute(update(filings).where(filings.c.uid == uid).values(summary_en=summary, body_en=body_en))
@@ -281,6 +291,9 @@ def retranslate_titles(limit: int = 200) -> int:
             rows = conn.execute(select(filings.c.uid, filings.c.title_local).where(
                 filings.c.market == src.market, filings.c.title_en == filings.c.title_local)
                 .order_by(filings.c.filed_date.desc()).limit(limit)).all()
+        if not rows:
+            continue
+        rows = [r for r in rows if not looks_english(r.title_local)]
         if not rows:
             continue
         titles = [r.title_local for r in rows]

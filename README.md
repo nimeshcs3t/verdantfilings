@@ -87,6 +87,16 @@ more companies, CSV export.
 - **Telegram commands:** /list /today /add /remove /portfolio /price /help (answered at the next job run).
 - **Housekeeping:** daily clean-up (filings older than 2 years except starred, long texts after 180 days, expired
   sign-ins, old logs) and an Admin health panel with runs, warnings, usage and table sizes.
+- **Calendar:** a month view (agenda list on phones) of results releases, meetings and dividend dates announced in
+  filings, for your watchlist and holdings.
+- **Ask your filings:** a question box on Search that answers from your companies' filings with numbered sources.
+- **Broker CSV import** on Portfolio > Transactions, with automatic column matching, row-by-row checks, agorot
+  conversion for Israel and duplicate skipping. Transactions can also be edited.
+- **Today dashboard:** portfolio value and move, filings today, major filings and dates in the next 7 days.
+- **Phone layout:** a bottom menu and denser tables on small screens. Real logos where available (US logo service;
+  website icons for Korean and Israeli companies), letter tiles otherwise.
+- **Job scheduling:** filings and alerts every run; dates every 30 minutes; insider trades hourly; financials,
+  AI briefs and logos every 6 hours; clean-up daily.
 - **Dark mode** following the device setting, or chosen in the ⋮ menu, then Settings.
 
 Share prices come from free sources (Yahoo Finance chart data, then Stooq) and may be delayed or unavailable for
@@ -131,6 +141,15 @@ EDINET covers statutory filings (annual and semi-annual reports, extraordinary r
 reports, tender offers, buyback reports). Exchange announcements on TDnet (earnings flashes, guidance) have
 no free API and aren't included. EDINET data is under the Public Data License 1.0: commercial use is
 allowed with the credit line the app shows next to Japanese filings.
+
+## More markets
+
+Each has an on/off secret (GitHub Actions and Streamlit): ENABLE_TDNET (Japan timely disclosures, no key),
+ENABLE_HKEX (Hong Kong, HKEXnews), ENABLE_OSLO (Norway, NewsWeb), ENABLE_TWSE (Taiwan, official open data; the feed
+shows the current day, so history builds from when it's on), ENABLE_AMF (France, official AMF open data; companies by
+ISIN), ENABLE_UK_NSM (UK, FCA National Storage Mechanism; companies by London ticker, LEI from GLEIF) and
+ENABLE_NORDIC (Sweden, Denmark, Finland via Nasdaq Nordic; companies by ticker). Website-based sources pause
+themselves for some hours if a site refuses a request. Titles are translated where needed.
 
 ## Israel (MAYA website, personal use)
 

@@ -31,6 +31,8 @@ API = "https://api.edinet-fsa.go.jp/api/v2"
 CODE_LIST = "https://disclosure2dl.edinet-fsa.go.jp/searchdocument/codelist/Edinetcode.zip"
 VIEWER = "https://disclosure2.edinet-fsa.go.jp/WZEK0040.aspx?{},,"
 PAUSE = 0.4   # EDINET asks for polite request rates
+TDNET = "https://www.release.tdnet.info/inbs/"
+TDNET_DAYS = 14   # TDnet keeps about a month; history is read for the last two weeks
 
 # docTypeCode -> English name (EDINET form codes)
 DOC_TYPES = {
@@ -80,7 +82,8 @@ class EdinetSource(FilingSource):
     timezone = "Asia/Tokyo"
     ticker_hint = "4-character TSE code, e.g. 7203"
     news_local = {"hl": "ja", "gl": "JP", "ceid": "JP:ja"}
-    attribution = "出典：金融庁 EDINET / Source: EDINET, Financial Services Agency of Japan, translated and summarized"
+    attribution = ("出典：金融庁 EDINET、東京証券取引所 TDnet / Source: EDINET (Financial Services Agency of Japan) and TDnet "
+                   "(Tokyo Stock Exchange), translated and summarized")
     backfill_days = 30            # one request per day of history
     incremental_days = 1          # today and yesterday
 
@@ -94,8 +97,54 @@ class EdinetSource(FilingSource):
     def _key(self) -> str | None:
         return get_secret("EDINET_API_KEY")
 
+    def tdnet_on(self) -> bool:
+        return str(get_secret("ENABLE_TDNET", "false")).lower() in {"1", "true", "yes"}
+
     def is_configured(self) -> bool:
-        return bool(self._key())
+        return bool(self._key()) or self.tdnet_on()
+
+    # ---- TDnet (timely disclosures: results flashes, guidance, buybacks...) ----
+    def _tdnet_day(self, day: date) -> list[dict]:
+        if not hasattr(self, "_td_cache"):
+            from .webhttp import PoliteClient
+            self._td_cache, self._td_http = {}, PoliteClient("tdnet", pause=0.5)
+        fresh = day >= self.today() - timedelta(days=1)
+        cached = self._td_cache.get(day)
+        if cached and (not fresh or time.time() - cached[0] < 300):
+            return cached[1]
+        rows, page, last = [], 1, 1
+        while page <= min(last, 40):
+            try:
+                r = self._td_http.get(f"{TDNET}I_list_{page:03d}_{day:%Y%m%d}.html")
+            except Exception:
+                break
+            html = r.content.decode("utf-8", "ignore")
+            pages = [int(n) for n in re.findall(r"I_list_(\d{3})_\d{8}\.html", html)]
+            last = max(pages + [last])
+            for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S):
+                cell = lambda cls: (re.search(rf'class="[^"]*{cls}[^"]*"[^>]*>(.*?)</td>', tr, re.S) or [None, ""])[1]
+                code = re.sub(r"<[^>]+>|\s", "", cell("kjCode"))
+                link = re.search(r'href="([^"]+\.pdf)"', cell("kjTitle"))
+                title = " ".join(re.sub(r"<[^>]+>", " ", cell("kjTitle")).split())
+                if code and link and title:
+                    rows.append({"code": code, "name": " ".join(re.sub(r"<[^>]+>", " ", cell("kjName")).split()),
+                                 "title": title, "pdf": link.group(1), "time": re.sub(r"<[^>]+>|\s", "", cell("kjTime"))})
+            page += 1
+        self._td_cache[day] = (time.time(), rows)
+        return rows
+
+    def _tdnet_filings(self, company: Company, start: date, end: date) -> list[Filing]:
+        out, day = [], max(start, self.today() - timedelta(days=TDNET_DAYS))
+        while day <= end:
+            if day.weekday() < 5:
+                for r in self._tdnet_day(day):
+                    if r["code"][:4] != company.ticker[:4]:
+                        continue
+                    out.append(Filing(uid=f"JP:TD{r['pdf'].removesuffix('.pdf')}"[:64], market=self.market,
+                                      ticker=company.ticker, company_name=company.name_en, filed_date=day,
+                                      title_local=r["title"], filer=r["name"], url=TDNET + r["pdf"], title_en=""))
+            day += timedelta(days=1)
+        return out
 
     def _get(self, path: str, **params) -> requests.Response:
         params["Subscription-Key"] = self._key()
@@ -189,7 +238,8 @@ class EdinetSource(FilingSource):
         return translate_title(item.get("filerName") or "", "ja")
 
     def list_filings(self, company: Company, start: date, end: date) -> list[Filing]:
-        out, day = [], start
+        out = self._tdnet_filings(company, start, end) if self.tdnet_on() else []
+        day = start if self._key() else end + timedelta(days=1)
         while day <= end:
             for item in self._documents(day):
                 related = {item.get("edinetCode"), item.get("issuerEdinetCode"), item.get("subjectEdinetCode")}
@@ -219,7 +269,12 @@ class EdinetSource(FilingSource):
 
     def market_feed(self) -> list[dict]:
         out = []
-        for day in (self.today() - timedelta(days=1), self.today()):
+        if self.tdnet_on():
+            for r in self._tdnet_day(self.today()):
+                out.append({"uid": f"JP:TD{r['pdf'].removesuffix('.pdf')}"[:64], "ticker": r["code"][:4],
+                            "company": r["name"], "title_local": r["title"], "title_en": "",
+                            "url": TDNET + r["pdf"], "date": self.today()})
+        for day in ((self.today() - timedelta(days=1), self.today()) if self._key() else ()):
             for item in self._documents(day):
                 sec = str(item.get("secCode") or "")
                 if not sec or str(item.get("withdrawalStatus", "0")) != "0" or not item.get("docID"):
@@ -232,8 +287,13 @@ class EdinetSource(FilingSource):
         return out
 
     def fetch_document_text(self, uid: str) -> str:
-        """Text of the filing's main documents (the HTML inside the XBRL package)."""
+        """Text of the filing's main documents (the HTML inside the XBRL package), or a TDnet PDF."""
         doc_id = uid.split(":", 1)[1]
+        if doc_id.startswith("TD"):
+            from .doctext import pdf_text
+            if not hasattr(self, "_td_http"):
+                self._tdnet_day(self.today())
+            return pdf_text(self._td_http.get(f"{TDNET}{doc_id[2:]}.pdf").content)
         r = self._get(f"documents/{doc_id}", type=1)
         if "zip" not in r.headers.get("content-type", "") and not r.content[:2] == b"PK":
             return ""

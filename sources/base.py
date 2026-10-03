@@ -32,6 +32,7 @@ class Filing:
     url: str
     title_en: str = ""      # set when the source already provides a good English title
     price_sensitive: bool = False   # exchange-marked market-moving announcement (ASX)
+    body: str = ""                  # full text, when the source gives it with the listing
 
 
 class FilingSource(ABC):
@@ -43,6 +44,7 @@ class FilingSource(ABC):
     ticker_hint = ""
     news_local: dict | None = None   # Google News params for local-language press
     attribution = ""        # credit line required by the data licence, shown with the data
+    resolve_in_app = False  # no full company list: the website looks companies up directly (by ticker)
     backfill_days = 90      # history to load when a company is first added
     incremental_days = 7    # window re-checked on each later sync
 

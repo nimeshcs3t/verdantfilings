@@ -10,7 +10,9 @@ import requests
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                          "Chrome/140.0.0.0 Safari/537.36"}
-SUFFIX = {"KR": [".KS", ".KQ"], "US": [""], "AU": [".AX"], "JP": [".T"], "PL": [".WA"], "IL": [".TA"]}
+SUFFIX = {"KR": [".KS", ".KQ"], "US": [""], "AU": [".AX"], "JP": [".T"], "PL": [".WA"], "IL": [".TA"], "HK": [".HK"],
+          "NO": [".OL"], "TW": [".TW", ".TWO"], "UK": [".L"], "SE": [".ST"], "DK": [".CO"], "FI": [".HE"]}
+MINOR = {"GBp", "GBX", "ILA", "ZAc"}       # prices quoted in pence / agorot / cents
 STOOQ = {"US": ".us", "JP": ".jp", "PL": ""}
 
 
@@ -22,12 +24,13 @@ def _yahoo(symbol: str, years: int = 1) -> list[tuple[date, float]]:
     result = ((r.json().get("chart") or {}).get("result") or [None])[0]
     if not result:
         return []
+    scale = 100.0 if (result.get("meta") or {}).get("currency") in MINOR else 1.0
     offset = int((result.get("meta") or {}).get("gmtoffset") or 0)
     closes = (((result.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or []
     out = []
     for ts, close in zip(result.get("timestamp") or [], closes):
         if close is not None:
-            out.append((datetime.fromtimestamp(ts + offset, tz=timezone.utc).date(), float(close)))
+            out.append((datetime.fromtimestamp(ts + offset, tz=timezone.utc).date(), float(close) / scale))
     return out
 
 
@@ -44,13 +47,42 @@ def _stooq(symbol: str) -> list[tuple[date, float]]:
     return out
 
 
+def yahoo_search(query: str, exchanges: tuple[str, ...] = (), limit: int = 8) -> list[dict]:
+    """Yahoo Finance symbol search, optionally limited to exchange codes (e.g. LSE, STO, CPH, HEL, PAR)."""
+    try:
+        r = requests.get("https://query1.finance.yahoo.com/v1/finance/search",
+                         params={"q": query, "quotesCount": 15, "newsCount": 0}, headers=HEADERS, timeout=20)
+        quotes = r.json().get("quotes", []) if r.status_code == 200 else []
+    except Exception:
+        return []
+    out = [q for q in quotes if q.get("symbol") and (not exchanges or q.get("exchange") in exchanges)
+           and q.get("quoteType") in (None, "EQUITY")]
+    return out[:limit]
+
+
+_ISIN_SYMBOLS: dict[str, str | None] = {}
+
+
+def symbol_for_isin(isin: str, exchanges: tuple[str, ...] = ("PAR",)) -> str | None:
+    if isin not in _ISIN_SYMBOLS:
+        found = yahoo_search(isin, exchanges, 1)
+        _ISIN_SYMBOLS[isin] = found[0]["symbol"] if found else None
+    return _ISIN_SYMBOLS[isin]
+
+
 def history(market: str, ticker: str, years: int = 1) -> list[tuple[date, float]]:
     """Daily closes, oldest first (about `years` years). Empty if no free source has the stock."""
+    if market == "FR":
+        symbol = symbol_for_isin(ticker) if len(ticker) == 12 else f"{ticker}.PA"
+        try:
+            return _yahoo(symbol, years) if symbol else []
+        except Exception:
+            return []
     for suffix in SUFFIX.get(market, []):
         try:
             data = _yahoo(f"{ticker}{suffix}", years)
             if len(data) > 5:
-                return [(d, v / 100) for d, v in data] if market == "IL" else data   # agorot -> shekels
+                return data
         except Exception:
             continue
     if market in STOOQ:

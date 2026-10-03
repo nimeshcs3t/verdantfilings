@@ -74,6 +74,8 @@ def _site(market: str, ticker: str, source_id: str) -> str | None:
     if market == "KR":
         data = src._json("company.json", corp_code=source_id) if src and src.is_configured() else {}
         return (data.get("hm_url") or None) if data.get("status") == "000" else None
+    if market == "TW":
+        return getattr(src, "websites", {}).get(source_id)
     if market in ("US", "IL", "PL"):
         return getattr(src, "websites", {}).get(str(int(source_id)) if market == "US" else source_id)
     return None

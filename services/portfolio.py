@@ -14,7 +14,8 @@ from sources import get_source
 from . import prices
 
 log = logging.getLogger(__name__)
-CURRENCY = {"KR": "KRW", "US": "USD", "AU": "AUD", "PL": "PLN", "JP": "JPY", "IL": "ILS"}
+CURRENCY = {"KR": "KRW", "US": "USD", "AU": "AUD", "PL": "PLN", "JP": "JPY", "IL": "ILS", "HK": "HKD", "NO": "NOK",
+            "TW": "TWD", "FR": "EUR", "UK": "GBP", "SE": "SEK", "DK": "DKK", "FI": "EUR"}
 KINDS = {"move": "Daily move of at least", "above": "Price rises above", "below": "Price falls below"}
 
 

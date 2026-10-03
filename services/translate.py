@@ -13,7 +13,9 @@ from sqlalchemy.exc import IntegrityError
 from core.config import get_secret
 from core.db import get_engine, translations
 
-LANG_NAMES = {"ko": "Korean", "ja": "Japanese", "pl": "Polish", "iw": "Hebrew", "he": "Hebrew", "zh": "Chinese"}
+LANG_NAMES = {"ko": "Korean", "ja": "Japanese", "pl": "Polish", "iw": "Hebrew", "he": "Hebrew", "zh": "Chinese",
+              "zh-TW": "Traditional Chinese", "fr": "French", "no": "Norwegian", "sv": "Swedish", "da": "Danish",
+              "fi": "Finnish"}
 MYMEMORY_CODES = {"iw": "he"}
 _google_paused_until = 0.0     # Google refuses shared cloud servers; stop asking for a while after a refusal
 
@@ -258,6 +260,28 @@ def translate_lines(lines: list[str], src: str) -> list[str]:
                 results[i] = en.strip()
                 _cache_put(_cache_key(lines[i], src), results[i])   # only real translations are saved
     return [r or lines[i] for i, r in enumerate(results)]
+
+
+ENGLISH_WORDS = re.compile(r"\b(the|of|and|for|to|in|on|with|share|shares|report|results|annual|quarterly|interim|notice|"
+                           r"update|announces?|buy-?back|meeting|financial|transaction|own|statement|board|director|"
+                           r"agreement|contract|offering|dividend|acquisition|disposal|holding|holdings|presentation|"
+                           r"company|change|new|release|half-year|year|period|information|voting|rights)\b", re.I)
+
+
+def looks_english(text: str) -> bool:
+    """True for titles that are already English (plain letters and common English filing words)."""
+    t = (text or "").strip()
+    return bool(t) and t.isascii() and bool(ENGLISH_WORDS.search(t))
+
+
+def mostly_english(text: str) -> bool:
+    """True for document text that is already English (so it needn't be translated)."""
+    sample = (text or "")[:2000]
+    letters = [c for c in sample if c.isalpha()]
+    if len(letters) < 40:
+        return False
+    ascii_share = sum(c.isascii() for c in letters) / len(letters)
+    return ascii_share > 0.97 and len(ENGLISH_WORDS.findall(sample)) >= 5
 
 
 def glossary_or_cached(title: str, src: str) -> str | None:

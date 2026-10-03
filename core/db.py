@@ -331,6 +331,12 @@ company_sites = Table(
     Column("checked_at", DateTime(timezone=True), default=utcnow),
 )
 
+filing_texts = Table(
+    "filing_texts", metadata,               # original text that came with the listing (no document to fetch later)
+    Column("uid", String(64), primary_key=True),
+    Column("body", Text),
+)
+
 _engine: Engine | None = None
 _lock = threading.Lock()
 

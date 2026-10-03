@@ -37,7 +37,9 @@ def add(user: dict, market: str, ticker: str) -> tuple[dict | None, str | None]:
         return None, f"Your plan allows {limit} companies. Remove one to add another."
     comp = get_company(market, ticker)
     if comp is None:
-        if not direct_fetch() and not listings_ready(market):
+        from sources import get_source
+        src = get_source(market)
+        if not direct_fetch() and not (src and src.resolve_in_app) and not listings_ready(market):
             return None, "The company list is still loading. Try again in a few minutes."
         return None, f"No listed company found for {ticker}."
     try:

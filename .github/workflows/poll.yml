@@ -29,6 +29,13 @@ jobs:
           ASX_ALERTS: ${{ secrets.ASX_ALERTS }}
           ENABLE_NEWCONNECT: ${{ secrets.ENABLE_NEWCONNECT }}
           ENABLE_MAYA: ${{ secrets.ENABLE_MAYA }}
+          ENABLE_TDNET: ${{ secrets.ENABLE_TDNET }}
+          ENABLE_HKEX: ${{ secrets.ENABLE_HKEX }}
+          ENABLE_OSLO: ${{ secrets.ENABLE_OSLO }}
+          ENABLE_TWSE: ${{ secrets.ENABLE_TWSE }}
+          ENABLE_AMF: ${{ secrets.ENABLE_AMF }}
+          ENABLE_UK_NSM: ${{ secrets.ENABLE_UK_NSM }}
+          ENABLE_NORDIC: ${{ secrets.ENABLE_NORDIC }}
           TASE_API_KEY: ${{ secrets.TASE_API_KEY }}
           TASE_MAYA_PATH: ${{ secrets.TASE_MAYA_PATH }}
           TASE_DAILY_CALL_LIMIT: ${{ secrets.TASE_DAILY_CALL_LIMIT }}

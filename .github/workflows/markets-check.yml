@@ -10,106 +10,83 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests
-      - name: Test new markets
+      - name: Details for new markets
         run: |
           python - <<'EOF'
           import datetime as dt, json, re
           import requests
 
-          UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
-          SIGNS = ("incapsula", "imperva", "cf-chl", "cloudflare", "captcha", "access denied", "datadome", "perimeterx", "akamai")
+          UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"}
           today = dt.date.today()
-          weekday = today - dt.timedelta(days=max(0, today.weekday() - 4) or (1 if today.weekday() == 0 else 0))
-          if weekday.weekday() > 4:
-              weekday -= dt.timedelta(days=weekday.weekday() - 4)
+          day = today - dt.timedelta(days=1)
+          while day.weekday() > 4:
+              day -= dt.timedelta(days=1)
+          J = lambda o, n=700: print("   ", json.dumps(o, ensure_ascii=False)[:n])
 
-          def go(label, method, url, **kw):
-              kw.setdefault("headers", {}).setdefault("User-Agent", UA)
-              try:
-                  r = requests.request(method, url, timeout=40, **kw)
-              except Exception as e:
-                  print(f"[{label}] FAILED: {type(e).__name__} {str(e)[:120]}"); return None
-              low = r.text[:50000].lower()
-              signs = [s for s in SIGNS if s in low or s in str(r.headers).lower()]
-              print(f"[{label}] status {r.status_code} | {(r.headers.get('content-type') or '')[:40]} | {len(r.content)} bytes | protection: {signs or 'none'}")
-              return r
+          print("=== JAPAN: one TDnet row ===")
+          r = requests.get(f"https://www.release.tdnet.info/inbs/I_list_001_{day:%Y%m%d}.html", headers=UA, timeout=40)
+          html = r.content.decode("utf-8", "ignore")
+          rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S)
+          print("    rows:", len(rows), "| pager:", re.findall(r"I_list_\d{3}_\d{8}\.html", html)[:6])
+          for row in rows[1:3]:
+              print("   ", " ".join(row.split())[:700])
 
-          def peek(obj, n=500):
-              print("   ", json.dumps(obj, ensure_ascii=False)[:n])
+          print("\n=== FRANCE: one record ===")
+          r = requests.get("https://www.info-financiere.gouv.fr/api/explore/v2.0/catalog/datasets/flux-amf-new-prod/records",
+                           params={"limit": 1, "order_by": "uin_dat_amf desc"}, headers=UA, timeout=40)
+          print("    status", r.status_code)
+          d = r.json(); recs = d.get("records") or d.get("results") or []
+          if recs:
+              rec = recs[0].get("record", {}).get("fields") or recs[0]
+              print("    fields:", list(rec)[:60]); J(rec, 1500)
 
-          print("=== JAPAN (TDnet daily list) ===")
-          r = go("TDnet", "GET", f"https://www.release.tdnet.info/inbs/I_list_001_{weekday:%Y%m%d}.html")
-          if r is not None and r.status_code == 200:
-              rows = re.findall(r'<tr>.*?</tr>', r.content.decode("utf-8", "ignore"), re.S)
-              print("    rows:", len(rows), "| sample:", " ".join(re.sub(r"<[^>]+>", " ", rows[1] if len(rows) > 1 else "").split())[:200])
-
-          print("\n=== HONG KONG (HKEXnews) ===")
-          r = go("stock list", "GET", "https://www1.hkexnews.hk/ncms/script/eds/activestock_sehk_e.json")
-          stock_id = None
-          if r is not None and r.status_code == 200:
-              stocks = r.json(); print("    stocks:", len(stocks)); peek(stocks[:2], 300)
-              tencent = next((s for s in stocks if str(s.get("c")) == "00700"), None); print("    Tencent:", tencent)
-              stock_id = tencent and tencent.get("i")
-          if stock_id:
-              r = go("title search", "GET", "https://www1.hkexnews.hk/search/titleSearchServlet.do", params={
-                  "sortDir": 0, "sortByOptions": "DateTime", "category": 0, "market": "SEHK", "stockId": stock_id,
-                  "documentType": -1, "fromDate": f"{today - dt.timedelta(days=30):%Y%m%d}", "toDate": f"{today:%Y%m%d}",
-                  "title": "", "searchType": 0, "t1code": -2, "t2Gcode": -2, "t2code": -2, "rowRange": 20, "lang": "E"})
-              if r is not None and r.status_code == 200:
-                  rows = json.loads(r.json().get("result") or "[]"); print("    announcements:", len(rows)); peek(rows[:2], 600)
-
-          print("\n=== NORWAY (Oslo Bors NewsWeb) ===")
-          r = go("NewsWeb", "GET", "https://api3.oslo.oslobors.no/v1/newsreader/list",
-                 params={"issuer": "EQNR", "fromDate": f"{today - dt.timedelta(days=30)}", "toDate": f"{today}"},
-                 headers={"Origin": "https://newsweb.oslobors.no", "Referer": "https://newsweb.oslobors.no/"})
-          if r is not None and r.status_code == 200:
-              d = r.json(); msgs = (d.get("data") or {}).get("messages") or []
-              print("    keys:", list(d)[:5], "| messages:", len(msgs)); peek(msgs[:2], 600)
-
-          print("\n=== TAIWAN (TWSE open data) ===")
-          r = go("material info", "GET", "https://openapi.twse.com.tw/v1/opendata/t187ap04_L")
-          if r is not None and r.status_code == 200:
-              d = r.json(); print("    items:", len(d)); peek(d[:1], 500)
-          r = go("company list", "GET", "https://openapi.twse.com.tw/v1/opendata/t187ap03_L")
-          if r is not None and r.status_code == 200:
-              d = r.json(); print("    companies:", len(d)); peek(d[:1], 400)
-
-          print("\n=== FRANCE (AMF info-financiere) ===")
-          base = "https://www.info-financiere.gouv.fr/api/explore/v2.0"
-          r = go("datasets", "GET", f"{base}/catalog/datasets", params={"limit": 20})
-          if r is not None and r.status_code == 200:
-              d = r.json(); sets = d.get("datasets") or d.get("results") or []
-              for s in sets[:10]:
-                  ds = s.get("dataset") or s
-                  print("    dataset:", ds.get("dataset_id"), "| fields:", [f.get("name") for f in ds.get("fields", [])][:14])
-
-          print("\n=== UK (FCA National Storage Mechanism) ===")
-          body = {"from": 0, "size": 5, "sort": "submitted_date", "sortorder": "desc",
-                  "criteriaObj": {"criteria": [{"name": "company_lei", "value": ["", "213800KZ6KMKJ8SUEA55", "disclose_org", "related_org"]},
+          print("\n=== UK: Shell on the NSM ===")
+          body = {"from": 0, "size": 3, "sort": "submitted_date", "sortorder": "desc",
+                  "criteriaObj": {"criteria": [{"name": "company_lei", "value": ["", "21380068P1DRHMJ8KU70", "disclose_org", "related_org"]},
                                                {"name": "latest_flag", "value": "Y"}],
                                   "dateCriteria": [{"name": "publication_date", "value": {"from": None, "to": f"{today}T23:59:59Z"}},
                                                    {"name": "submitted_date", "value": {"from": None, "to": f"{today}T23:59:59Z"}}]}}
-          r = go("NSM", "POST", "https://api.data.fca.org.uk/search?index=nsm-search", json=body,
-                 headers={"Origin": "https://data.fca.org.uk", "Referer": "https://data.fca.org.uk/", "Accept": "application/json, text/plain, */*"})
-          if r is not None and r.status_code == 200:
-              hits = (r.json().get("hits") or {}).get("hits") or []
-              print("    hits:", len(hits)); peek([h.get("_source") for h in hits[:2]], 600)
-          r = go("GLEIF (LEI lookup)", "GET", "https://api.gleif.org/api/v1/lei-records", params={"filter[entity.legalName]": "SHELL PLC", "page[size]": 2})
-          if r is not None and r.status_code == 200:
-              for x in r.json().get("data", [])[:2]:
-                  print("    LEI:", x.get("id"), x.get("attributes", {}).get("entity", {}).get("legalName", {}).get("name"))
+          r = requests.post("https://api.data.fca.org.uk/search?index=nsm-search", json=body, timeout=40,
+                            headers={**UA, "Origin": "https://data.fca.org.uk", "Referer": "https://data.fca.org.uk/", "Accept": "application/json, text/plain, */*"})
+          hits = (r.json().get("hits") or {}).get("hits") or []
+          print("    status", r.status_code, "| hits:", len(hits))
+          if hits:
+              J(hits[0].get("_source"), 900)
 
-          print("\n=== SWEDEN AND NORDICS (Nasdaq Nordic company news) ===")
-          r = go("Nasdaq Nordic", "GET", "https://api.news.eu.nasdaq.com/news/query.action", params={
-              "type": "json", "showAttachments": "true", "showCnsSpecific": "true", "showCompany": "true", "countResults": "false",
-              "freeText": "", "company": "", "market": "", "cnscategory": "", "fromDate": "", "toDate": "",
-              "globalGroup": "exchangeNotice", "globalName": "NordicAllMarkets", "displayLanguage": "en", "language": "en",
-              "timeZone": "CET", "dateMask": "yyyy-MM-dd HH:mm:ss", "limit": 5, "start": 0, "dir": "DESC"},
-              headers={"Origin": "https://www.nasdaq.com", "Referer": "https://www.nasdaq.com/"})
-          if r is not None and r.status_code == 200:
-              try:
-                  d = r.json(); items = ((d.get("results") or {}).get("item")) or []
-                  print("    keys:", list(d)[:5], "| items:", len(items)); peek(items[:2], 600)
-              except ValueError:
-                  print("    not JSON:", r.text[:200])
+          print("\n=== NORDICS: news filtered to one company ===")
+          base = {"type": "json", "showAttachments": "true", "showCnsSpecific": "true", "showCompany": "true", "countResults": "false",
+                  "freeText": "", "market": "", "cnscategory": "", "fromDate": "", "toDate": "", "globalGroup": "exchangeNotice",
+                  "globalName": "NordicAllMarkets", "displayLanguage": "en", "language": "en", "timeZone": "CET",
+                  "dateMask": "yyyy-MM-dd HH:mm:ss", "limit": 3, "start": 0, "dir": "DESC"}
+          for label, extra in (("company=Novo Nordisk A/S", {"company": "Novo Nordisk A/S"}), ("freeText=Volvo", {"freeText": "Volvo", "company": ""})):
+              r = requests.get("https://api.news.eu.nasdaq.com/news/query.action", params={**base, **extra}, timeout=40,
+                               headers={**UA, "Origin": "https://www.nasdaq.com", "Referer": "https://www.nasdaq.com/"})
+              items = ((r.json().get("results") or {}).get("item")) or []
+              print(f"    [{label}] status {r.status_code} | items {len(items)} |", [(i.get("company"), i.get("headline", "")[:50]) for i in items])
+          if items:
+              print("    fields:", list(items[0].keys()))
+
+          print("\n=== NORWAY: market-wide list and one message ===")
+          h = {**UA, "Origin": "https://newsweb.oslobors.no", "Referer": "https://newsweb.oslobors.no/"}
+          r = requests.get("https://api3.oslo.oslobors.no/v1/newsreader/list", params={"fromDate": f"{today - dt.timedelta(days=2)}", "toDate": f"{today}"}, headers=h, timeout=40)
+          msgs = ((r.json().get("data") or {}).get("messages")) or []
+          print("    market-wide status", r.status_code, "| messages:", len(msgs), "| issuers:", len({m.get("issuerSign") for m in msgs}))
+          if msgs:
+              r = requests.get("https://api3.oslo.oslobors.no/v1/newsreader/message", params={"messageId": msgs[0]["messageId"]}, headers=h, timeout=40)
+              m = ((r.json().get("data") or {}).get("message")) or {}
+              print("    message status", r.status_code, "| keys:", list(m)[:20], "| body:", " ".join(str(m.get("body", "")).split())[:200])
+
+          print("\n=== TAIWAN: company list fields ===")
+          r = requests.get("https://openapi.twse.com.tw/v1/opendata/t187ap03_L", headers=UA, timeout=60)
+          rec = r.json()[0]
+          print("    fields:", list(rec))
+          print("    English name fields:", {k: v for k, v in rec.items() if "英文" in k})
+
+          print("\n=== TICKER LOOKUP (for UK and Nordic companies) ===")
+          r = requests.get("https://query1.finance.yahoo.com/v1/finance/search", params={"q": "Shell", "quotesCount": 5, "newsCount": 0}, headers=UA, timeout=30)
+          print("    status", r.status_code)
+          try:
+              print("   ", [(q.get("symbol"), q.get("shortname"), q.get("exchange")) for q in r.json().get("quotes", [])])
+          except ValueError:
+              print("    not JSON:", r.text[:150])
           EOF

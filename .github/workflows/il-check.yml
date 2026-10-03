@@ -10,50 +10,51 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests
-      - name: Test MAYA and MAGNA
+      - name: Look inside MAYA company data
         run: |
           python - <<'EOF'
-          import datetime as dt, json, re
+          import json
           import requests
 
           s = requests.Session()
           s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-                            "Accept-Language": "en-US,en;q=0.9,he;q=0.8", "Referer": "https://maya.tase.co.il/",
-                            "Origin": "https://maya.tase.co.il"})
-          PROTECTION = ("incapsula", "imperva", "cf-chl", "cloudflare", "captcha", "akamai", "access denied",
-                        "request unsuccessful", "_abck", "bm_sz", "datadome", "perimeterx")
+                            "Accept-Language": "en-US,en;q=0.9", "Referer": "https://maya.tase.co.il/",
+                            "Origin": "https://maya.tase.co.il", "X-Maya-With": "allow"})
+          API = "https://mayaapi.tase.co.il/api"
 
-          def show(label, method, url, **kw):
-              print(f"\n=== {label} ===\n{method} {url}")
+          r = s.get(f"{API}/company/alldetails", params={"companyId": 604}, timeout=30)
+          print("alldetails status", r.status_code)
+          data = r.json()
+
+          def walk(obj, path="", depth=0):
+              if depth > 3:
+                  return
+              if isinstance(obj, dict):
+                  for k, v in obj.items():
+                      p = f"{path}.{k}" if path else k
+                      if isinstance(v, list):
+                          first = v[0] if v else None
+                          keys = list(first.keys())[:14] if isinstance(first, dict) else type(first).__name__
+                          print(f"LIST {p} ({len(v)} items) first item keys: {keys}")
+                          if v and isinstance(first, dict) and any(x in p.lower() for x in ("report", "event", "message", "announce")):
+                              print("   sample:", json.dumps(first, ensure_ascii=False)[:600])
+                      elif isinstance(v, dict):
+                          walk(v, p, depth + 1)
+          walk(data)
+          print("\ntop-level keys:", list(data)[:30] if isinstance(data, dict) else type(data).__name__)
+
+          print("\n=== likely report addresses ===")
+          for url, params in [
+              (f"{API}/company/reports", {"companyId": 604}),
+              (f"{API}/company/companyreports", {"companyId": 604}),
+              (f"{API}/report/reports", {"companyId": 604}),
+              (f"{API}/reports/company", {"companyId": 604}),
+              (f"{API}/report/latest", {}),
+              (f"{API}/report/breakingannouncement", {}),
+          ]:
               try:
-                  r = s.request(method, url, timeout=30, **kw)
+                  r = s.get(url, params=params, timeout=30)
+                  print(r.status_code, url, "|", (r.headers.get("content-type") or "")[:30], "|", r.text[:160].replace("\n", " "))
               except Exception as e:
-                  print("FAILED:", type(e).__name__, str(e)[:150]); return None
-              body = r.text[:100000]
-              cookies = ", ".join(c.name for c in s.cookies)
-              hits = [p for p in PROTECTION if p in body.lower() or p in cookies.lower() or p in str(r.headers).lower()]
-              print("status", r.status_code, "|", r.headers.get("content-type"), "| size", len(r.content),
-                    "| server", r.headers.get("server"), "| cookies:", cookies or "none")
-              print("bot protection signs:", hits or "none")
-              text = " ".join(re.sub(r"<[^>]+>", " ", body).split())
-              print("start:", text[:300])
-              return r
-
-          today = dt.date.today(); start = today - dt.timedelta(days=3)
-          show("MAYA website", "GET", "https://maya.tase.co.il/")
-          show("MAYA reports page", "GET", "https://maya.tase.co.il/reports/company")
-          body = {"Page": 1, "GroupData": [], "DateFrom": f"{start}T00:00:00.000Z", "DateTo": f"{today}T23:59:59.000Z",
-                  "IsBreakingAnnouncement": False, "IsForTaseMember": False, "Events": [], "Subjects": [], "QOpt": 1, "ViewPage": 2}
-          r = show("MAYA reports data (guess 1)", "POST", "https://mayaapi.tase.co.il/api/report/filter", json=body,
-                   headers={"X-Maya-With": "allow", "Content-Type": "application/json"})
-          if r is not None and "json" in (r.headers.get("content-type") or ""):
-              try:
-                  data = r.json(); print("JSON keys:", list(data)[:10] if isinstance(data, dict) else type(data).__name__)
-                  print("sample:", json.dumps(data, ensure_ascii=False)[:800])
-              except ValueError:
-                  pass
-          show("MAYA company data (guess 2)", "GET", "https://mayaapi.tase.co.il/api/company/alldetails?companyId=604",
-               headers={"X-Maya-With": "allow"})
-          show("TASE market site", "GET", "https://market.tase.co.il/en/market_data/company/604/reports_maya")
-          show("MAGNA (Securities Authority)", "GET", "https://www.magna.isa.gov.il/")
+                  print("FAILED", url, type(e).__name__)
           EOF

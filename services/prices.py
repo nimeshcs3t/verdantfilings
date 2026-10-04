@@ -24,7 +24,9 @@ def _yahoo(symbol: str, years: int = 1) -> list[tuple[date, float]]:
     result = ((r.json().get("chart") or {}).get("result") or [None])[0]
     if not result:
         return []
-    scale = 100.0 if (result.get("meta") or {}).get("currency") in MINOR else 1.0
+    currency = (result.get("meta") or {}).get("currency")
+    # Tel Aviv prices are quoted in agorot (1/100 shekel) even when Yahoo labels them ILS; pence etc. are labelled.
+    scale = 100.0 if currency in MINOR or symbol.upper().endswith(".TA") else 1.0
     offset = int((result.get("meta") or {}).get("gmtoffset") or 0)
     closes = (((result.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or []
     out = []

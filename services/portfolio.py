@@ -70,8 +70,7 @@ def price_history(market: str, ticker: str, years: int = 1) -> list:
     """Daily closes in the holding's currency (any-market symbols are converted from pence and similar)."""
     if market != OTHER:
         return prices.history(market, ticker, years)
-    info = symbol_info(ticker) or {"scale": 1.0}
-    return [(d, v / (info["scale"] or 1.0)) for d, v in prices.symbol_history(ticker, years)]
+    return prices.symbol_history(ticker, years)     # pence, agorot etc. are converted when prices are downloaded
 
 
 def hide_amounts(user_id: int) -> bool:

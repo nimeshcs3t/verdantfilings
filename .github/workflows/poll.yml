@@ -36,6 +36,11 @@ jobs:
           ENABLE_AMF: ${{ secrets.ENABLE_AMF }}
           ENABLE_UK_NSM: ${{ secrets.ENABLE_UK_NSM }}
           ENABLE_NORDIC: ${{ secrets.ENABLE_NORDIC }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
           TASE_API_KEY: ${{ secrets.TASE_API_KEY }}
           TASE_MAYA_PATH: ${{ secrets.TASE_MAYA_PATH }}
           TASE_DAILY_CALL_LIMIT: ${{ secrets.TASE_DAILY_CALL_LIMIT }}

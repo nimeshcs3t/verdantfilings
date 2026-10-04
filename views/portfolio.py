@@ -424,6 +424,9 @@ def _checked_price(market: str, ticker: str, day, price: float, confirmed: bool)
         ratio = price / close
         if market == "IL" and 50 <= ratio <= 200:
             return price / 100, f"Converted {price:,.4g} agorot to {price / 100:,.4g} shekels (TASE shows prices in agorot)."
+        if market in ("IL", "UK") and 0.005 <= ratio <= 0.02 and not confirmed:
+            return None, (f"The market closed at about {close:,.4g} on that date, so {price:,.4g} looks 100 times too small. "
+                          f"Did you mean {price * 100:,.4g}? Enter that, or tick \"The price is correct\" to keep {price:,.4g}.")
         if (ratio > 3 or ratio < 1 / 3) and not confirmed:
             return None, (f"The market closed at about {close:,.4g} on that date, so {price:,.4g} looks off. Check it is "
                           "the price per share in the stock's own currency, or tick \"The price is correct\" to save anyway.")
@@ -493,7 +496,18 @@ def transactions_tab(user: dict, txs: list[dict]) -> None:
                 else ' <span class="fl-flag">⚠ price looks off</span>' if odd else "")
         fee_text = (f', fees {MASK if _hidden() else f"{t['fees']:,.2f}"}' if t["fees"] else "")
         price_text = MASK if _hidden() else f'{t["price"]:,.4g}'
+        hundredths = t["market"] in ("IL", "UK") or (t["market"] == portfolio.OTHER and t["ticker"].endswith((".TA", ".L")))
+        factor = None
+        if odd and hundredths and close:
+            ratio = t["price"] / close
+            factor = 100.0 if 0.005 <= ratio <= 0.02 else 0.01 if 50 <= ratio <= 200 else None
         c1, c2, c3 = st.columns([6, 0.8, 0.8], vertical_alignment="center")
+        if factor:
+            fixed = t["price"] * factor
+            if c1.button(f"Fix {'×' if factor > 1 else '÷'}100: use {fixed:,.2f} {cur}", key=f"tx-fix-{t['id']}", type="secondary"):
+                err = portfolio.update_transaction(uid, t["id"], t["kind"], t["tx_date"], t["shares"], fixed, t["fees"] or 0)
+                st.session_state["pf-note"] = err or f"Price corrected to {fixed:,.2f} {cur}."
+                st.rerun()
         c1.markdown(f'{t["tx_date"]:%d %b %Y}  **{t["kind"].capitalize()}** {_shares(t["shares"])} × '
                     f'{esc(names[key])} ({esc(t["ticker"])}) at {price_text} {cur}{fee_text}{flag}', unsafe_allow_html=True)
         if c2.button("Edit", key=f"tx-edit-{t['id']}", type="tertiary"):

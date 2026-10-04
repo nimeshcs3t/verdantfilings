@@ -248,8 +248,8 @@ def financials_tab(market: str, ticker: str) -> None:
         if market in financials.SUPPORTED:
             st.caption("Financial figures load within a day of adding a company to a watchlist.")
         else:
-            st.caption("Structured financial figures are available for Korean and US companies. For other markets, "
-                       "see the annual and half-year reports in the Filings tab.")
+            st.caption("Structured financial figures are available for Korea, the USA, Taiwan, France, the UK, Norway, "
+                       "Sweden, Denmark and Finland. For other markets, see the annual and half-year reports in the Filings tab.")
         return
     kinds = [k for k in ("annual", "quarter") if data[k]]
     kind = st.segmented_control("Period", kinds, default=kinds[0], key="fin-kind", label_visibility="collapsed",
@@ -271,8 +271,10 @@ def financials_tab(market: str, ticker: str) -> None:
     html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Period</th><th class="num">Revenue</th>'
                '<th class="num">Operating profit</th><th class="num">Net profit</th><th class="num">Op. margin</th></tr>'
                f'{body}</table></div>')
-    st.caption("Source: " + ("DART key accounts (consolidated where available)" if market == "KR" else "SEC company facts (XBRL)")
-               + ". Figures as reported; periods are calendar-aligned.")
+    source = {"KR": "DART key accounts (consolidated where available)", "US": "SEC company facts (XBRL)",
+              "TW": "TWSE open data. Quarters are cumulative for the year to date; history builds up from each new quarter"}.get(
+        market, "the company's digital annual reports (ESEF) via filings.xbrl.org; yearly figures")
+    st.caption(f"Source: {source}. Figures as reported.")
 
 
 def insiders_tab(market: str, ticker: str, filings_rows: list[dict]) -> None:

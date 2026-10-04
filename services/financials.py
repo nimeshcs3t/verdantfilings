@@ -15,7 +15,16 @@ from sources import get_source
 
 log = logging.getLogger(__name__)
 REFRESH = timedelta(days=7)
-SUPPORTED = {"KR", "US"}
+SUPPORTED = {"KR", "US", "TW", "FR", "UK", "NO", "SE", "DK", "FI"}
+ESEF = {"FR", "UK", "NO", "SE", "DK", "FI"}       # annual reports in the EU/UK digital format (filings.xbrl.org)
+ESEF_COUNTRY = {"NO": "NO", "SE": "SE", "DK": "DK", "FI": "FI", "UK": "GB", "FR": "FR"}
+TW_SETS = ("ci", "basi", "bd", "fh", "ins", "mim")  # TWSE income statements by industry format
+TW_FIELDS = {"revenue": ("營業收入", "收益合計", "淨收益", "收入合計"), "op_income": ("營業利益（損失）",),
+             "net_income": ("本期淨利（淨損）", "本期稅後淨利（淨損）")}
+ESEF_CONCEPTS = {"revenue": ("ifrs-full:Revenue", "ifrs-full:RevenueFromContractsWithCustomers"),
+                 "op_income": ("ifrs-full:ProfitLossFromOperatingActivities",),
+                 "net_income": ("ifrs-full:ProfitLoss", "ifrs-full:ProfitLossAttributableToOwnersOfParent")}
+_TW_CACHE: dict = {}
 
 US_TAGS = {
     "revenue": [("us-gaap", "Revenues"), ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax"),
@@ -88,6 +97,98 @@ def fetch_us(cik: str) -> list[dict]:
     return [{**r, "currency": currency} for r in annual + quarter]
 
 
+def fetch_tw(ticker: str) -> list[dict]:
+    """Latest quarter from TWSE open data (thousands of TWD, cumulative for the year to date)."""
+    import requests
+    if not _TW_CACHE.get("rows") or __import__("time").time() - _TW_CACHE.get("at", 0) > 3600:
+        rows = []
+        for name in TW_SETS:
+            try:
+                r = requests.get(f"https://openapi.twse.com.tw/v1/opendata/t187ap06_L_{name}", timeout=60)
+                if r.status_code == 200:
+                    rows += r.json()
+            except Exception:
+                continue
+        _TW_CACHE.update(rows=rows, at=__import__("time").time())
+    rec = next((r for r in _TW_CACHE["rows"] if str(r.get("公司代號") or "").strip() == ticker), None)
+    if not rec:
+        return []
+    year, quarter = int(rec.get("年度") or 0) + 1911, int(rec.get("季別") or 0)
+    if year < 1990 or not 1 <= quarter <= 4:
+        return []
+    values = {}
+    for key, names in TW_FIELDS.items():
+        v = next((_number(rec.get(n)) for n in names if _number(rec.get(n)) is not None), None)
+        values[key] = v * 1000 if v is not None else None
+    if quarter == 4:
+        return [{"kind": "annual", "period": str(year), "currency": "TWD", **values}]
+    return [{"kind": "quarter", "period": f"{year} Q{quarter} YTD", "currency": "TWD", **values}]
+
+
+def lei_for(market: str, ticker: str, source_id: str, name: str) -> str | None:
+    """LEI for annual-report lookups: the UK source already uses it; France by ISIN; others by name (GLEIF)."""
+    from core.usage import get_state, set_state
+    import requests
+    if market == "UK":
+        return source_id
+    cached = get_state(f"lei:{market}:{ticker}")
+    if cached is not None:
+        return cached or None
+    lei = None
+    try:
+        if market == "FR":
+            data = requests.get("https://api.gleif.org/api/v1/lei-records", params={"filter[isin]": source_id}, timeout=30).json()
+            lei = data["data"][0]["id"] if data.get("data") else None
+        else:
+            plain = re.sub(r"\s+", " ", re.sub(r"\(.*?\)", "", name or "")).strip()
+            for params in ({"filter[entity.legalName]": plain},
+                           {"filter[fulltext]": plain, "filter[entity.legalAddress.country]": ESEF_COUNTRY.get(market, "")}):
+                data = requests.get("https://api.gleif.org/api/v1/lei-records", params={**params, "page[size]": 3}, timeout=30).json()
+                hit = next((d for d in data.get("data", []) if d.get("attributes", {}).get("entity", {}).get("status") == "ACTIVE"), None)
+                if hit:
+                    lei = hit["id"]
+                    break
+    except Exception:
+        return None
+    set_state(f"lei:{market}:{ticker}", lei or "")
+    return lei
+
+
+def fetch_esef(lei: str) -> list[dict]:
+    """Yearly revenue, operating profit and net profit from the company's latest digital annual reports."""
+    import requests
+    from datetime import date as _date
+    listing = requests.get("https://filings.xbrl.org/api/filings", params={"filter[entity.identifier]": lei, "sort": "-period_end",
+                                                                           "page[size]": 2},
+                           headers={"Accept": "application/vnd.api+json"}, timeout=60).json().get("data", [])
+    periods: dict[str, dict] = {}
+    for item in listing:
+        url = (item.get("attributes") or {}).get("json_url")
+        if not url:
+            continue
+        facts = requests.get("https://filings.xbrl.org" + url, timeout=120).json().get("facts") or {}
+        for f in facts.values():
+            dims = f.get("dimensions") or {}
+            if set(dims) - {"concept", "entity", "period", "unit", "language"}:
+                continue          # skip breakdowns by segment, region and so on
+            key = next((k for k, names in ESEF_CONCEPTS.items() if dims.get("concept") in names), None)
+            span = str(dims.get("period") or "").split("/")
+            if not key or len(span) != 2:
+                continue
+            start, end = (_date.fromisoformat(x[:10]) for x in span)
+            if not 330 <= (end - start).days <= 400:
+                continue          # yearly figures only
+            last_day = end - timedelta(days=1)
+            label = str(last_day.year) if last_day.month == 12 else f"{last_day.year}-{last_day.month:02d}"
+            row = periods.setdefault(label, {"kind": "annual", "period": label,
+                                             "currency": str(dims.get("unit") or "").replace("iso4217:", "")})
+            rank = ESEF_CONCEPTS[key].index(dims["concept"])
+            if row.get(f"_{key}", 99) > rank:
+                row[key], row[f"_{key}"] = _number(f.get("value")), rank
+    rows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in periods.values()]
+    return sorted(rows, key=lambda r: r["period"])[-5:]
+
+
 # ---- worker -----------------------------------------------------------------------------
 def _meta(conn, market: str, ticker: str) -> dict | None:
     row = conn.execute(select(company_meta).where(company_meta.c.market == market,
@@ -108,29 +209,42 @@ def touch_meta(market: str, ticker: str, **values) -> None:
 def refresh(limit: int = 6) -> int:
     """Refresh financials for watched Korean and US companies, oldest first, a few per run."""
     with get_engine().connect() as conn:
-        watched = conn.execute(select(companies.c.market, companies.c.ticker, companies.c.source_id).select_from(
+        watched = conn.execute(select(companies.c.market, companies.c.ticker, companies.c.source_id, companies.c.name_en).select_from(
             companies.join(watchlist, and_(watchlist.c.market == companies.c.market,
                                            watchlist.c.ticker == companies.c.ticker)))
             .where(companies.c.market.in_(SUPPORTED)).distinct()).all()
         due = []
-        for market, ticker, source_id in watched:
+        for market, ticker, source_id, name in watched:
             src = get_source(market)
             if not src or not src.is_configured():
                 continue
             meta = _meta(conn, market, ticker)
             last = as_utc(meta["fin_updated"]) if meta and meta.get("fin_updated") else None
             if not last or utcnow() - last > REFRESH:
-                due.append((last or utcnow() - timedelta(days=9999), market, ticker, source_id))
+                due.append((last or utcnow() - timedelta(days=9999), market, ticker, source_id, name))
     done = 0
-    for _, market, ticker, source_id in sorted(due)[:limit]:
+    for _, market, ticker, source_id, name in sorted(due)[:limit]:
         try:
-            rows = fetch_kr(source_id, get_source("KR").today().year) if market == "KR" else fetch_us(source_id)
+            if market == "KR":
+                rows = fetch_kr(source_id, get_source("KR").today().year)
+            elif market == "US":
+                rows = fetch_us(source_id)
+            elif market == "TW":
+                rows = fetch_tw(ticker)
+            else:
+                lei = lei_for(market, ticker, source_id, name)
+                rows = fetch_esef(lei) if lei else []
         except Exception as exc:
             log.warning("financials failed for %s:%s: %s", market, ticker, exc)
             touch_meta(market, ticker, fin_updated=utcnow() - REFRESH + timedelta(days=1))   # retry tomorrow
             continue
         with get_engine().begin() as conn:
-            conn.execute(delete(financials).where(financials.c.market == market, financials.c.ticker == ticker))
+            if market == "TW":       # Taiwan publishes only the latest quarter: keep earlier ones
+                for r in rows:
+                    conn.execute(delete(financials).where(financials.c.market == market, financials.c.ticker == ticker,
+                                                          financials.c.kind == r["kind"], financials.c.period == r["period"]))
+            else:
+                conn.execute(delete(financials).where(financials.c.market == market, financials.c.ticker == ticker))
             for r in rows:
                 conn.execute(insert(financials).values(market=market, ticker=ticker, kind=r["kind"], period=r["period"],
                                                        revenue=r.get("revenue"), op_income=r.get("op_income"),

@@ -62,6 +62,11 @@ def css() -> str:
 .chip {{ display:inline-block; font-size:.72rem; font-weight:600; padding:1px 8px; border-radius:10px; margin-left:8px;
         vertical-align:2px; white-space:nowrap; }}
 {chips}
+.fl-flag.imp {{ color:var(--pine); border-color:var(--pine); }}
+.cal-ev.est {{ background:transparent !important; border:1px dashed var(--muted); color:var(--muted); }}
+.heat {{ border:1px solid var(--rule); border-radius:8px; padding:4px; margin:4px 0 14px; }}
+.heat svg {{ width:100%; height:340px; display:block; }}
+.goal-hit {{ fill:var(--amber); }}
 .fl-flag {{ display:inline-block; font-size:.72rem; font-weight:600; color:var(--amber); border:1px solid var(--amber);
            border-radius:10px; padding:0 7px; margin-left:8px; vertical-align:2px; }}
 .logo {{ display:inline-flex; width:24px; height:24px; border-radius:6px; align-items:center; justify-content:center;
@@ -303,7 +308,7 @@ def summary_html(text: str) -> str:
 
 
 def filing_row_html(f: dict, show_company: bool = True, is_new: bool = False, country: str = "",
-                    category: str = "other", move: str = "", starred: bool = False) -> str:
+                    category: str = "other", move: str = "", starred: bool = False, important: bool = False) -> str:
     dot = '<span class="fl-new" title="Added in the last 2 hours"></span>' if is_new else ""
     star = '<span class="fl-star" title="Starred">★</span>' if starred else ""
     where = f'<span class="fl-tk">{esc(country)}</span>' if country else ""
@@ -311,6 +316,8 @@ def filing_row_html(f: dict, show_company: bool = True, is_new: bool = False, co
                f'<span class="fl-tk">{esc(f["ticker"])}</span>{where}</div>' if show_company else "")
     lead = "" if show_company else dot + star
     flag = '<span class="fl-flag">Price sensitive</span>' if f.get("price_sensitive") else ""
+    if important:
+        flag += '<span class="fl-flag imp">Important</span>'
     orig = ""
     if f.get("title_local") and f["title_local"] != f.get("title_en"):
         orig = f'<div class="fl-orig ko">{esc(f["title_local"])}</div>'

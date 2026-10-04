@@ -37,6 +37,8 @@ def page() -> None:
     last = date(year, month, cal.monthrange(year, month)[1])
     items = [e for e in events_svc.between(pairs, first - timedelta(days=7), last + timedelta(days=7))
              if KINDS[events_svc.kind(e["label"])] in (picked or [])]
+    if "Results" in (picked or []):
+        items += [e for e in events_svc.expected_results(pairs, first - timedelta(days=7), last + timedelta(days=7)) if e.get("estimate")]
     by_day: dict[date, list[dict]] = {}
     for e in items:
         by_day.setdefault(e["event_date"], []).append(e)
@@ -48,9 +50,10 @@ def page() -> None:
         for d in week:
             classes = "cal-day" + (" out" if d.month != month else "") + (" today" if d == today else "")
             chips = "".join(
-                f'<a class="cal-ev k-{events_svc.kind(e["label"])}" href="{esc(e["url"])}" target="_blank" '
-                f'rel="noopener noreferrer" title="{esc(e["company_name"])}: {esc(e["label"])}">'
-                f'<b>{esc(e["ticker"])}</b> {esc(e["label"])}</a>' for e in by_day.get(d, [])[:4])
+                f'<a class="cal-ev k-{events_svc.kind(e["label"])}{" est" if e.get("estimate") else ""}" href="{esc(e["url"])}" '
+                f'target="_blank" rel="noopener noreferrer" title="{esc(e["company_name"])}: {esc(e["label"])}'
+                f'{" (estimated from past reporting dates)" if e.get("estimate") else ""}">'
+                f'<b>{esc(e["ticker"])}</b> {"est. results" if e.get("estimate") else esc(e["label"])}</a>' for e in by_day.get(d, [])[:4])
             more = f'<div class="cal-more">+{len(by_day[d]) - 4} more</div>' if len(by_day.get(d, [])) > 4 else ""
             cells.append(f'<div class="{classes}"><div class="cal-num">{d.day}</div>{chips}{more}</div>')
     html_block(f'<div class="cal-grid">{head}{"".join(cells)}</div>')
@@ -62,4 +65,13 @@ def page() -> None:
         f'<a href="{esc(e["url"])}" target="_blank" rel="noopener noreferrer">filing</a></div>' for e in month_items)
     html_block(f'<div class="cal-agenda">{agenda or "<div class=empty>No dates announced for this month yet.</div>"}</div>')
     st.caption("Dates come from filings that announce them (meeting notices, dividend decisions, results-date notices), "
-               "for your watchlist and holdings. Companies that haven't announced a date yet won't show one.")
+               "for your watchlist and holdings. Dashed 'est. results' dates are estimates from each company's past "
+               "reporting rhythm, replaced by the real date once announced.")
+
+    html_block('<div class="section">Upcoming results</div>')
+    soon = events_svc.expected_results(pairs, today, today + timedelta(days=120))
+    if not soon:
+        st.caption("No results dates known or estimated yet. They appear once companies have reported at least once here.")
+    html_block("".join(
+        f'<div class="ev-row"><b>{e["event_date"]:%a %d %b}</b>{logo_html(e["company_name"], e["ticker"], market=e["market"])}'
+        f'{esc(e["company_name"])} <span>{"estimate" if e.get("estimate") else "announced"}</span></div>' for e in soon[:40]))

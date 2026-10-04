@@ -337,6 +337,92 @@ filing_texts = Table(
     Column("body", Text),
 )
 
+user_settings = Table(
+    "user_settings", metadata,              # flexible per-member settings (email, briefs, new-listing markets...)
+    Column("user_id", Integer, primary_key=True),
+    Column("key", String(40), primary_key=True),
+    Column("value", Text),
+)
+
+journal = Table(
+    "journal", metadata,                    # investment journal entries
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, nullable=False),
+    Column("market", String(8)),
+    Column("ticker", String(16)),
+    Column("entry_date", Date, nullable=False),
+    Column("kind", String(16), nullable=False),        # thesis | buy | sell | update | review | lesson
+    Column("title", String(200)),
+    Column("body", Text),
+    Column("conviction", Integer),                      # 1-5
+    Column("tags", String(200)),
+    Column("review_on", Date),
+    Column("reminded", Boolean, nullable=False, default=False),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+    Index("ix_journal_user", "user_id", "entry_date"),
+)
+
+cash_moves = Table(
+    "cash_moves", metadata,                 # deposits, withdrawals, interest, dividends received as cash, fees
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, nullable=False),
+    Column("move_date", Date, nullable=False),
+    Column("kind", String(12), nullable=False),        # deposit | withdraw | interest | dividend | fee
+    Column("amount", Float, nullable=False),
+    Column("currency", String(8), nullable=False),
+    Column("note", String(200)),
+)
+
+goals = Table(
+    "goals", metadata,
+    Column("user_id", Integer, primary_key=True),
+    Column("target", Float, nullable=False),
+    Column("target_date", Date, nullable=False),
+    Column("monthly", Float, nullable=False, default=0),
+    Column("expected_return", Float, nullable=False, default=0.07),
+    Column("currency", String(8), nullable=False, default="USD"),
+)
+
+fair_values = Table(
+    "fair_values", metadata,
+    Column("user_id", Integer, primary_key=True),
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("value", Float, nullable=False),
+    Column("alert_pct", Float, nullable=False, default=10.0),
+    Column("note", Text),
+    Column("alerted_on", String(10)),
+)
+
+share_links = Table(
+    "share_links", metadata,
+    Column("token", String(64), primary_key=True),
+    Column("user_id", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+)
+
+filing_notes = Table(
+    "filing_notes", metadata,               # AI notes on reports: "changes" and "highlights"
+    Column("uid", String(64), primary_key=True),
+    Column("kind", String(16), primary_key=True),
+    Column("body", Text),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+)
+
+sent_once = Table(
+    "sent_once", metadata,                  # alerts that must only go out once (insider clusters, new listings...)
+    Column("key", String(120), primary_key=True),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+)
+
+new_listings = Table(
+    "new_listings", metadata,
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("name_en", String(200)),
+    Column("seen_on", Date),
+)
+
 _engine: Engine | None = None
 _lock = threading.Lock()
 

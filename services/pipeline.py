@@ -47,9 +47,16 @@ def refresh_listings(force: bool = False) -> int:
             continue
         if not rows:
             continue
+        with get_engine().connect() as conn:
+            old = {t for (t,) in conn.execute(select(listed_companies.c.ticker).where(listed_companies.c.market == src.market))}
         with get_engine().begin() as conn:
             conn.execute(delete(listed_companies).where(listed_companies.c.market == src.market))
             conn.execute(insert(listed_companies), rows)
+        try:
+            from .signals import record_new
+            record_new(src.market, old, rows)
+        except Exception as exc:
+            log.warning("new-listing check failed for %s: %s", src.market, exc)
         total += len(rows)
     return total
 
@@ -308,6 +315,11 @@ def retranslate_titles(limit: int = 200) -> int:
     return fixed
 
 
+def _fair_value_alerts() -> int:
+    from . import deliver, fairvalue, portfolio
+    return sum(deliver.send(uid, "Fair value alert", text) for uid, text in fairvalue.check(portfolio.price_history))
+
+
 def _due(name: str, minutes: int) -> bool:
     """True (and remembered) if `name` hasn't run in the last `minutes` minutes."""
     from datetime import datetime, timezone
@@ -351,13 +363,17 @@ def run_once() -> dict:
             except Exception as exc:
                 stats["errors"] += 1
                 log.warning("sync failed for %s:%s: %s", market, ticker, exc)
-        from . import bot, briefs, events, financials, housekeeping, insiders, logos, portfolio
+        from . import bot, briefs, digests, events, financials, housekeeping, insiders, journal, logos, notes, portfolio, signals
         from .alerts import run_alerts
         # (stats key, job, minimum minutes between runs; 0 = every run)
         steps = [("retranslated", retranslate_titles, 0), ("summaries", process_overviews, 0), (None, run_alerts, 0),
                  ("commands", bot.process_updates, 0), ("price_alerts", portfolio.check_alerts, 0),
                  ("events", events.refresh, 30), ("insiders", insiders.refresh, 60),
-                 ("financials", financials.refresh, 360), ("briefs", briefs.refresh, 360), ("logos", logos.refresh, 360)]
+                 ("financials", financials.refresh, 360), ("briefs", briefs.refresh, 360), ("logos", logos.refresh, 360),
+                 ("fair_value", _fair_value_alerts, 30), ("journal", journal.send_reminders, 60),
+                 ("report_notes", notes.refresh, 60), ("insider_alerts", signals.send_insider_alerts, 60),
+                 ("new_listings", signals.send_new_listing_alerts, 360), ("morning", digests.morning_briefs, 0),
+                 ("monthly", digests.monthly_reports, 0)]
         for key, step, every in steps:
             if every and not _due(f"job:{key}", every):
                 continue

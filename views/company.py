@@ -4,7 +4,7 @@ import streamlit as st
 
 from core.ui import esc, html_block, logo_html, page_header, relative_time
 from core.config import direct_fetch
-from services import briefs, chat, events as events_svc, financials, github, insiders, personal, prices, watch
+from services import briefs, chat, events as events_svc, fairvalue, financials, github, insiders, journal as journal_svc, personal, prices, watch
 from services.classify import ORDER, categorize, label as cat_label
 from services.pipeline import filings_for, get_company, search_companies, sync_company
 from sources import Company, configured_sources, get_source, visible_sources
@@ -115,6 +115,30 @@ def page() -> None:
     chart = prices.chart_svg(hist, [r["filed_date"] for r in rows])
     if chart:
         html_block(chart)
+
+    fv = fairvalue.get_all(user["id"]).get((market, comp["ticker"]))
+    last_price = hist[-1][1] if hist else None
+    label = "My fair value"
+    if fv and last_price:
+        up = fairvalue.upside(last_price, fv["value"])
+        label = f"My fair value: {fv['value']:,.2f} ({up * 100:+.1f}% from {last_price:,.2f})"
+    with st.expander(label, icon=":material/target:"):
+        with st.form(f"fv-{market}-{comp['ticker']}", border=False):
+            c1, c2 = st.columns(2)
+            value = c1.number_input("Fair value per share", min_value=0.0, value=float(fv["value"]) if fv else 0.0, step=1.0,
+                                    help="Your own estimate, in the share's trading currency. 0 removes it.")
+            pct = c2.number_input("Alert when within %", min_value=0.0, max_value=50.0, value=float(fv["alert_pct"]) if fv else 10.0, step=1.0)
+            note = st.text_area("How you got there", value=(fv or {}).get("note") or "", height=80)
+            if st.form_submit_button("Save fair value"):
+                fairvalue.save(user["id"], market, comp["ticker"], value, pct, note)
+                st.rerun()
+
+    entries = journal_svc.entries(user["id"], market, comp["ticker"])
+    with st.expander(f"Journal ({len(entries)})", icon=":material/history_edu:"):
+        from views.journal import entry_card, entry_form
+        entry_form(user["id"], preset=(market, comp["ticker"]), key=f"cj-{comp['ticker']}")
+        for e in entries[:20]:
+            entry_card(e, show_company=False, key="cj")
 
     with st.expander("My notes on this company", icon=":material/edit_note:"):
         note = personal.get_note(user["id"], market, comp["ticker"])

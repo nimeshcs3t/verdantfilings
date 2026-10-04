@@ -67,12 +67,16 @@ def page() -> None:
 
     main, side = st.columns([2.2, 1], gap="large")
     with main:
-        cols = st.columns(3 if len(markets) > 1 else [1, 1, 1])
+        cols = st.columns(4)
         cols[0].selectbox("Period", list(PERIODS), key="today-period")
         cols[1].selectbox("View", ["By time", "By company"], key="today-view")
+        cols[2].selectbox("Sort", ["Newest first", "Most important first"], key="today-sort")
         if len(markets) > 1:
-            cols[2].selectbox("Country", ["All"] + [get_source(m).country for m in markets], key="today-market")
+            cols[3].selectbox("Country", ["All"] + [get_source(m).country for m in markets], key="today-market")
 
+        if st.session_state.get("today-sort") == "Most important first":
+            from services.importance import score as importance_score
+            rows.sort(key=lambda r: (-importance_score(r), r["filed_date"]), reverse=False)
         present = [k for k in ORDER if any(r["category"] == k for r in rows)]
         if rows:
             counts = {k: sum(r["category"] == k for r in rows) for k in present}

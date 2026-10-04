@@ -60,14 +60,21 @@ def positions(txs: list[dict], until: date | None = None, convert=None) -> dict[
 
 def daily_values(txs: list[dict], prices: dict[tuple[str, str], Series], fx: dict[str, Series],
                  currency_of: dict[tuple[str, str], str], base: str, trading_days: list[date],
-                 base_fx: Series | None = None) -> list[dict]:
+                 base_fx: Series | None = None, cash_moves: list[dict] | None = None) -> list[dict]:
     """For each trading day from the first transaction: portfolio value and money added, in the base currency.
-    `flow` is money at the actual trade prices; `flow_mkt` values the same trades at that day's closing prices."""
-    if not txs:
+    `flow` is money at the actual trade prices; `flow_mkt` values the same trades at that day's closing prices.
+
+    With cash_moves (deposits, withdrawals, interest, dividends, fees), the value includes cash in each currency,
+    trades just move money between cash and shares, and only deposits and withdrawals count as money added."""
+    cash_moves = sorted(cash_moves or [], key=lambda m: (m["move_date"], m.get("id") or 0))
+    if not txs and not cash_moves:
         return []
     txs = sorted(txs, key=lambda t: (t["tx_date"], t.get("id") or 0))
-    start = txs[0]["tx_date"]
-    days = sorted({d for d in trading_days if d >= start} | {t["tx_date"] for t in txs})
+    start = min([t["tx_date"] for t in txs] + [m["move_date"] for m in cash_moves])
+    days = sorted({d for d in trading_days if d >= start} | {t["tx_date"] for t in txs} | {m["move_date"] for m in cash_moves})
+    account = bool(cash_moves)
+    cash: dict[str, float] = {}
+    j = 0
 
     def to_base(amount: float, cur: str, day: date) -> float | None:
         usd = amount if cur == "USD" else (amount * fx[cur].at(day) if cur in fx and fx[cur].at(day) else None)
@@ -90,14 +97,29 @@ def daily_values(txs: list[dict], prices: dict[tuple[str, str], Series], fx: dic
             close = prices[key].at(t["tx_date"]) if key in prices else None
             if t["kind"] == "buy":
                 held[key] = held.get(key, 0.0) + t["shares"]
-                flow += to_base(t["shares"] * t["price"] + fees, cur, t["tx_date"]) or 0.0
-                flow_mkt += to_base(t["shares"] * (close if close is not None else t["price"]), cur, day) or 0.0
+                if account:
+                    cash[cur] = cash.get(cur, 0.0) - (t["shares"] * t["price"] + fees)
+                else:
+                    flow += to_base(t["shares"] * t["price"] + fees, cur, t["tx_date"]) or 0.0
+                    flow_mkt += to_base(t["shares"] * (close if close is not None else t["price"]), cur, day) or 0.0
             else:
                 sold = min(t["shares"], held.get(key, 0.0))
                 held[key] = held.get(key, 0.0) - sold
-                flow -= to_base(sold * t["price"] - fees, cur, t["tx_date"]) or 0.0
-                flow_mkt -= to_base(sold * (close if close is not None else t["price"]), cur, day) or 0.0
+                if account:
+                    cash[cur] = cash.get(cur, 0.0) + (sold * t["price"] - fees)
+                else:
+                    flow -= to_base(sold * t["price"] - fees, cur, t["tx_date"]) or 0.0
+                    flow_mkt -= to_base(sold * (close if close is not None else t["price"]), cur, day) or 0.0
             i += 1
+        while j < len(cash_moves) and cash_moves[j]["move_date"] <= day:
+            m = cash_moves[j]
+            sign = -1.0 if m["kind"] in ("withdraw", "fee") else 1.0
+            cash[m["currency"]] = cash.get(m["currency"], 0.0) + sign * m["amount"]
+            if m["kind"] in ("deposit", "withdraw"):          # only money in or out of the account is a flow
+                moved = to_base(sign * m["amount"], m["currency"], day) or 0.0
+                flow += moved
+                flow_mkt += moved
+            j += 1
         total, ok = 0.0, True
         for key, shares in held.items():
             if shares <= 1e-12:
@@ -108,9 +130,28 @@ def daily_values(txs: list[dict], prices: dict[tuple[str, str], Series], fx: dic
                 ok = False
                 break
             total += v
+        cash_total = 0.0
+        for cur, amount in cash.items():
+            if abs(amount) > 1e-9:
+                v = to_base(amount, cur, day)
+                if v is None:
+                    ok = False
+                    break
+                cash_total += v
         if ok:
-            out.append({"date": day, "value": total, "flow": flow, "flow_mkt": flow_mkt})
+            out.append({"date": day, "value": total + cash_total, "flow": flow, "flow_mkt": flow_mkt, "cash": cash_total})
     return out
+
+
+def cash_balances(txs: list[dict], cash_moves: list[dict]) -> dict[str, float]:
+    """Cash left in each currency after deposits, withdrawals, income, fees and every buy and sell."""
+    if not cash_moves:
+        return {}
+    bal: dict[str, float] = {}
+    for m in cash_moves:
+        sign = -1.0 if m["kind"] in ("withdraw", "fee") else 1.0
+        bal[m["currency"]] = bal.get(m["currency"], 0.0) + sign * m["amount"]
+    return bal
 
 
 def twr_index(daily: list[dict]) -> list[tuple[date, float]]:

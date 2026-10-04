@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from core.ui import esc, html_block, logo_html, page_header
-from services import importer, portfolio, prices, watch
+from services import cash as cash_svc, goals as goals_svc, heatmap, importer, portfolio, prices, share as share_svc, watch
 from services.pipeline import filings_for, get_company, search_companies
 from services.portfolio_calc import (PERIODS, Series, allocation, daily_values, money_series, money_weighted_returns,
                                      period_returns, positions, shadow_benchmark,
@@ -63,13 +63,14 @@ def _money(v, cur: str, signed: bool = False, always: bool = False) -> str:
     return f"{v:+,.{digits}f} {cur}" if signed else f"{v:,.{digits}f} {cur}"
 
 
-def build(txs: list[dict], base: str, bench_symbol: str | None) -> dict:
-    """Everything the page shows, in the base currency."""
+def build(txs: list[dict], base: str, bench_symbol: str | None, cash_moves: list[dict] | None = None) -> dict:
+    """Everything the page shows, in the base currency. With cash entries, cash is part of the value."""
+    cash_moves = cash_moves or []
     pairs = sorted({(t["market"], t["ticker"]) for t in txs})
     currency_of = {p: portfolio.currency_for(*p) for p in pairs}
     with ThreadPoolExecutor(max_workers=8) as pool:
         hist = dict(zip(pairs, pool.map(lambda p: long_history(*p), pairs)))
-    currencies = (set(currency_of.values()) | ({base} if base != "USD" else set())) - {"USD"}
+    currencies = (set(currency_of.values()) | {m["currency"] for m in cash_moves} | ({base} if base != "USD" else set())) - {"USD"}
     fxs = {c: Series(fx_history(c)) for c in currencies}
     problems = []
     no_fx = {c for c in currencies if not fxs[c].values}
@@ -94,7 +95,9 @@ def build(txs: list[dict], base: str, bench_symbol: str | None) -> dict:
     price_series = {p: Series(hist[p]) for p in pairs if hist.get(p)}
     bench_raw = bench_history(bench_symbol) if bench_symbol else []
     days = sorted({d for v in hist.values() for d, _ in v} | {d for d, _ in bench_raw})
-    daily = daily_values(usable, price_series, fxs, currency_of, base, days, base_fx)
+    days = sorted(set(days) | {m["move_date"] for m in cash_moves})
+    daily = daily_values(usable, price_series, fxs, currency_of, base, days, base_fx,
+                         cash_moves=[m for m in cash_moves if m["currency"] not in no_fx])
     index = twr_index(daily)
     bench_base = None
     if bench_raw:
@@ -121,6 +124,26 @@ def build(txs: list[dict], base: str, bench_symbol: str | None) -> dict:
                      "shares": p["shares"], "avg": p["avg"], "last": last, "day": prices.last_move(h) if h else None,
                      "price_base": price_base, "value_base": p["shares"] * price_base if price_base is not None else None,
                      "cost_base": p["cost_base"], "realized_base": p["realized_base"]})
+    if cash_moves:
+        balances: dict[str, float] = {}
+        for m in cash_moves:
+            sign = -1.0 if m["kind"] in ("withdraw", "fee") else 1.0
+            balances[m["currency"]] = balances.get(m["currency"], 0.0) + sign * m["amount"]
+        for t in usable:
+            cur = currency_of[(t["market"], t["ticker"])]
+            fees = t.get("fees") or 0
+            balances[cur] = balances.get(cur, 0.0) + (-(t["shares"] * t["price"] + fees) if t["kind"] == "buy"
+                                                      else t["shares"] * t["price"] - fees)
+        for cur, amount in sorted(balances.items()):
+            if abs(amount) < 0.005 or cur in no_fx:
+                continue
+            currency_of[("CASH", cur)] = cur
+            rows.append({"market": "CASH", "ticker": cur, "name": f"Cash ({cur})", "country": "Cash", "currency": cur,
+                         "shares": amount, "avg": 1.0, "last": 1.0, "day": 0.0, "price_base": None,
+                         "value_base": convert(amount, ("CASH", cur), today), "cost_base": convert(amount, ("CASH", cur), today) or 0.0,
+                         "realized_base": 0.0, "is_cash": True})
+        if any(r.get("is_cash") and (r["value_base"] or 0) < 0 for r in rows):
+            problems.append("A cash balance is negative: add the deposits that paid for your purchases on the Cash tab.")
     total = sum(r["value_base"] or 0 for r in rows)
     for r in rows:
         r["weight"] = (r["value_base"] or 0) / total if total else 0
@@ -129,7 +152,7 @@ def build(txs: list[dict], base: str, bench_symbol: str | None) -> dict:
     realized = sum(p["realized_base"] for p in pos.values())
     cost = sum(r["cost_base"] for r in rows)
     today_change = (daily[-1]["value"] - daily[-2]["value"] - daily[-1]["flow"]) if len(daily) >= 2 else None
-    rows.sort(key=lambda r: -(r["value_base"] or 0))
+    rows.sort(key=lambda r: (bool(r.get("is_cash")), -(r["value_base"] or 0)))
     shadow = shadow_benchmark(daily, bench_base) if bench_base and daily else []
     return {"rows": rows, "daily": daily, "index": index, "bench": bench_base, "problems": problems, "shadow": shadow,
             "returns": period_returns(index, bench_base) if index else [],
@@ -174,11 +197,12 @@ def page() -> None:
     base = "USD" if mode == "USD" else home
     bench_symbol = BENCHMARKS[bench_label]
 
-    t_over, t_hold, t_reb, t_tx, t_alert = st.tabs(["Overview", "Holdings", "Rebalance", "Transactions", "Price alerts"])
+    t_over, t_hold, t_cash, t_reb, t_tx, t_goal, t_alert, t_rep = st.tabs(
+        ["Overview", "Holdings", "Cash", "Rebalance", "Transactions", "Goals", "Price alerts", "Report & share"])
     model = None
     if txs:
         with st.spinner("Calculating returns"):
-            model = build(txs, base, bench_symbol)
+            model = build(txs, base, bench_symbol, cash_svc.list_moves(uid))
         for p in model["problems"]:
             st.caption(p)
 
@@ -200,8 +224,14 @@ def page() -> None:
             st.caption("Add holdings first.")
     with t_tx:
         transactions_tab(user, txs)
+    with t_cash:
+        cash_tab(user, model, base)
+    with t_goal:
+        goals_tab(user, model, base)
     with t_alert:
         alerts_tab(user)
+    with t_rep:
+        report_tab(user, model)
 
 
 def overview(model: dict, base: str, bench_symbol: str | None) -> None:
@@ -249,7 +279,7 @@ def overview(model: dict, base: str, bench_symbol: str | None) -> None:
                    + (f"{bench_symbol} is its price return over the same periods." if bench_symbol else ""))
 
     total, cost, realized = model["total"], model["cost"], model["realized"]
-    gain = total - cost + realized
+    gain = total - sum(r["flow"] for r in model["daily"])
     added = sum(max(r["flow"], 0.0) for r in model["daily"])
     stats = [("Value", _money(total, base), ""),
              ("Total gain", _money(gain, base, True), f'{_pct(gain / added if added else None)} on {_money(added, base)} put in'),
@@ -261,6 +291,11 @@ def overview(model: dict, base: str, bench_symbol: str | None) -> None:
         for k, v, sub in stats) + "</div>")
 
     rows = model["rows"]
+    heat = heatmap.svg([{"name": r["name"], "ticker": r["ticker"], "value": r["value_base"], "move": r["day"]}
+                        for r in rows if not r.get("is_cash")])
+    if heat:
+        st.caption("Today's moves: size shows each holding's value, colour its move today.")
+        html_block(heat)
     html_block('<div class="alloc-grid">' + donut_svg("By company", allocation(rows, "name"))
                + donut_svg("By country", allocation(rows, "country"))
                + donut_svg("By currency", allocation(rows, "currency")) + "</div>")
@@ -269,6 +304,12 @@ def overview(model: dict, base: str, bench_symbol: str | None) -> None:
 def holdings_table(model: dict, base: str, uid: int) -> None:
     lines = []
     for r in model["rows"]:
+        if r.get("is_cash"):
+            lines.append(f'<tr><td><span class="logo" style="background:#5F6B7A">$</span>{esc(r["name"])}</td>'
+                         f'<td class="num">–</td><td class="num opt">–</td><td class="num">{_money(r["shares"], r["currency"])}</td>'
+                         f'<td class="num">{_money(r["value_base"], base)}</td><td class="num opt">{r["weight"] * 100:.1f}%</td>'
+                         f'<td class="num">–</td><td class="num opt">–</td><td class="num opt"></td></tr>')
+            continue
         src = get_source(r["market"])
         recent = len(filings_for([(r["market"], r["ticker"])], src.today() - timedelta(days=7))) if src else ""
         lines.append(
@@ -288,7 +329,8 @@ def holdings_table(model: dict, base: str, uid: int) -> None:
 
 
 def rebalance_tab(model: dict, base: str, uid: int) -> None:
-    rows = model["rows"]
+    held_cash = sum(r["value_base"] or 0 for r in model["rows"] if r.get("is_cash"))
+    rows = [r for r in model["rows"] if not r.get("is_cash")]
     saved = portfolio.get_targets(uid)
     st.caption("Set a target weight for each holding (they should add up to 100%). Leave a target empty to leave "
                "that holding alone. Add new cash to see how to invest it.")
@@ -299,7 +341,8 @@ def rebalance_tab(model: dict, base: str, uid: int) -> None:
                             column_config={"Target %": st.column_config.NumberColumn(min_value=0.0, max_value=100.0,
                                                                                      step=0.5, format="%.1f")})
     c1, c2 = st.columns([1, 1], vertical_alignment="bottom")
-    cash = c1.number_input(f"New cash to invest ({base})", min_value=0.0, value=0.0, step=100.0)
+    cash = c1.number_input(f"New cash to invest ({base})", min_value=0.0, value=max(0.0, round(held_cash, 2)), step=100.0,
+                           help="Starts at the cash you hold (from the Cash tab).")
     targets = {(r["market"], r["ticker"]): (None if pd.isna(v) else float(v))
                for r, v in zip(rows, edited["Target %"].tolist())}
     if c2.button("Save targets", width="stretch"):
@@ -595,3 +638,126 @@ def alerts_tab(user: dict) -> None:
         if c2.button("Remove", key=f"pa-{a['id']}", type="tertiary"):
             portfolio.remove_alert(user["id"], a["id"])
             st.rerun()
+
+
+
+def cash_tab(user: dict, model: dict | None, base: str) -> None:
+    st.caption("Record deposits, withdrawals, dividends received, interest and fees. Once you add cash entries, your "
+               "value includes cash, buys and sells move money between cash and shares, and returns are measured on "
+               "the money you put in or took out.")
+    if model:
+        cash_rows = [r for r in model["rows"] if r.get("is_cash")]
+        if cash_rows:
+            html_block('<div class="stat-grid">' + "".join(
+                f'<div class="stat"><div class="k">{esc(r["name"])}</div><div class="v">{esc(_money(r["shares"], r["currency"]))}</div>'
+                f'<div class="k">{esc(_money(r["value_base"], base))}</div></div>' for r in cash_rows) + "</div>")
+    with st.form("cash-add", clear_on_submit=True, border=True):
+        c1, c2, c3, c4 = st.columns([1.1, 1.2, 1, 0.8])
+        day = c1.date_input("Date", value=date.today(), max_value=date.today())
+        kind = c2.selectbox("Type", list(cash_svc.KINDS), format_func=lambda k: cash_svc.KINDS[k])
+        amount = c3.number_input("Amount", min_value=0.0, step=100.0, format="%.2f")
+        currency = c4.selectbox("Currency", sorted(set(portfolio.CURRENCY.values()) | set(portfolio.HOME_CURRENCIES)), index=0)
+        note = st.text_input("Note (optional)")
+        if st.form_submit_button("Add", type="primary"):
+            err = cash_svc.add(user["id"], day, kind, amount, currency, note)
+            st.warning(err) if err else st.rerun()
+    for m in cash_svc.list_moves(user["id"])[:200]:
+        c1, c2 = st.columns([6, 1], vertical_alignment="center")
+        sign = "-" if m["kind"] in ("withdraw", "fee") else "+"
+        amount = MASK if _hidden() else f"{sign}{m['amount']:,.2f}"
+        c1.markdown(f'{m["move_date"]:%d %b %Y}  **{cash_svc.KINDS[m["kind"]]}** {amount} {m["currency"]}'
+                    + (f"  {esc(m['note'])}" if m["note"] else ""), unsafe_allow_html=True)
+        if c2.button("Delete", key=f"cash-del-{m['id']}", type="tertiary"):
+            cash_svc.remove(user["id"], m["id"])
+            st.rerun()
+
+
+def goals_tab(user: dict, model: dict | None, base: str) -> None:
+    saved = goals_svc.get(user["id"]) or {}
+    current = model["total"] if model and model.get("rows") else 0.0
+    with st.form("goal", border=True):
+        c1, c2, c3, c4 = st.columns(4)
+        target = c1.number_input(f"Target ({base})", min_value=0.0, value=float(saved.get("target") or max(current * 2, 100000.0)), step=10000.0)
+        when = c2.date_input("By", value=saved.get("target_date") or date(date.today().year + 10, 12, 31), min_value=date.today())
+        monthly = c3.number_input(f"Monthly saving ({base})", min_value=0.0, value=float(saved.get("monthly") or 0), step=100.0)
+        expected = c4.number_input("Expected return % a year", min_value=-20.0, max_value=40.0,
+                                   value=float((saved.get("expected_return") or 0.07) * 100), step=0.5)
+        if st.form_submit_button("Save goal", type="primary"):
+            goals_svc.save(user["id"], target, when, monthly, expected / 100, base)
+            st.rerun()
+    if not saved:
+        st.caption("Set a target to see a projection.")
+        return
+    months = goals_svc.months_between(date.today(), saved["target_date"])
+    path = goals_svc.project(current, saved["monthly"], saved["expected_return"], months)
+    need_m = goals_svc.needed_monthly(current, saved["target"], saved["expected_return"], months)
+    need_r = goals_svc.needed_return(current, saved["target"], saved["monthly"], months)
+    on_track = path[-1] >= saved["target"]
+    stats = [("Today", _money(current, base)), ("Projected", _money(path[-1], base)),
+             ("Monthly saving needed", _money(need_m, base)), ("Return needed", "out of reach" if need_r is None else f"{need_r * 100:.1f}% a year")]
+    html_block('<div class="stat-grid">' + "".join(f'<div class="stat"><div class="k">{k}</div><div class="v">{esc(v)}</div></div>'
+                                                   for k, v in stats) + "</div>")
+    st.markdown(("On track: the projection reaches your target." if on_track else
+                 "Not on track yet: see the monthly saving or return needed above.") +
+                f" ({months} months, {saved['expected_return'] * 100:.1f}% a year, {_money(saved['monthly'], base, always=True)} a month)")
+    html_block(goals_svc.chart_svg(path, saved["target"], ("Today", f"{saved['target_date']:%b %Y}")))
+    st.caption("A simple projection with a steady return; real markets go up and down. Not investment advice.")
+
+
+def report_tab(user: dict, model: dict | None) -> None:
+    st.markdown("**Monthly PDF report**")
+    st.caption("Sent on the 1st of each month (Telegram and/or email, see Account). You can also make one now.")
+    if st.button("Make this month's report", icon=":material/picture_as_pdf:"):
+        from services.digests import monthly_pdf
+        with st.spinner("Building the report"):
+            made = monthly_pdf(user["id"])
+        if made:
+            st.download_button("Download PDF", made[1], file_name=made[0], mime="application/pdf", type="primary")
+        else:
+            st.warning("Add some holdings first.")
+    st.divider()
+    st.markdown("**Read-only share link**")
+    st.caption("Anyone with the link sees your returns in %, allocation and holdings by weight. Never amounts, share "
+               "counts or prices paid. Remove the link any time.")
+    token = share_svc.get_token(user["id"])
+    from core.config import get_secret
+    app_url = (get_secret("APP_URL") or "").rstrip("/")
+    c1, c2 = st.columns([1, 1])
+    if token:
+        st.code(f"{app_url}/?share={token}" if app_url else f"?share={token}", language=None)
+        if c1.button("New link (old one stops working)"):
+            share_svc.create(user["id"])
+            st.rerun()
+        if c2.button("Remove link"):
+            share_svc.revoke(user["id"])
+            st.rerun()
+    elif c1.button("Create share link", type="primary"):
+        share_svc.create(user["id"])
+        st.rerun()
+
+
+def share_page(user_id: int) -> None:
+    """Public read-only view: percentages only."""
+    from services import cash as cash_svc2
+    txs = portfolio.list_transactions(user_id)
+    page_header("Shared portfolio", "Returns and allocation only. Amounts are private.")
+    if not txs:
+        st.caption("Nothing to show yet.")
+        return
+    st.session_state["pf-hide"] = True
+    model = build(txs, "USD", "SPY", cash_svc2.list_moves(user_id))
+    if not model["rows"]:
+        st.caption("Nothing to show yet.")
+        return
+    tiles = "".join(f'<div class="ret"><div class="lbl">{r["label"]}</div><div class="p {_cls(r["portfolio"])}">{_pct(r["portfolio"])}</div>'
+                    f'<div class="b">SPY <span class="{_cls(r["benchmark"])}">{_pct(r["benchmark"])}</span></div></div>'
+                    for r in model["money_returns"] if r["label"] != "Today")
+    html_block('<div class="ret-grid">' + tiles + "</div>")
+    rows = model["rows"]
+    html_block('<div class="alloc-grid">' + donut_svg("By company", allocation(rows, "name"))
+               + donut_svg("By country", allocation(rows, "country")) + donut_svg("By currency", allocation(rows, "currency")) + "</div>")
+    lines = "".join(f'<tr><td>{esc(r["name"])} <span class="fl-tk">{esc(r["ticker"]) if not r.get("is_cash") else ""}</span></td>'
+                    f'<td class="num">{r["weight"] * 100:.1f}%</td><td class="num">{_pct(r.get("gain_pct")) if not r.get("is_cash") else "–"}</td></tr>'
+                    for r in rows)
+    html_block(f'<div class="tbl-wrap"><table class="tbl"><tr><th>Holding</th><th class="num">Weight</th><th class="num">Gain</th></tr>{lines}</table></div>')
+    st.caption("Shared from Verdant Filings. Returns are on the money invested; prices may be delayed.")

@@ -80,8 +80,23 @@ def notify_pending() -> int:
             for chat in chats:
                 sent += telegram.send_message(chat, message)
                 time.sleep(0.05)
+            sent += _email_alert(row, message)
         with get_engine().begin() as conn:
             conn.execute(update(filings).where(filings.c.uid == row["uid"]).values(notified=True))
+    return sent
+
+
+def _email_alert(row: dict, message: str) -> int:
+    """Email the filing to watchers who chose email alerts (Telegram or not)."""
+    from . import emailer, settings
+    if not emailer.enabled():
+        return 0
+    sent = 0
+    for user_id, level in _watchers(row["market"], row["ticker"]).items():
+        prefs = settings.get(user_id)
+        if prefs.get("email") and prefs.get("email_alerts") and wants({**personal.get_prefs(user_id)}, level, row):
+            from .deliver import telegram_to_html
+            sent += emailer.send(prefs["email"], f"{row['company_name']}: {row['title_en']}"[:150], telegram_to_html(message))
     return sent
 
 
@@ -242,7 +257,8 @@ def daily_digests() -> int:
             lines.append(f'• [{esc(tag)}] <a href="{html.escape(r["url"])}">{esc(r["title_en"])}</a>')
         if app_url:
             lines += ["", f'<a href="{html.escape(app_url)}">Open the app</a>']
-        sent += _send_long(prefs["chat"], lines)
+        from . import deliver
+        sent += deliver.send(user_id, f"Your filings digest {now:%d %b}", "\n".join(lines))
         personal.save_prefs(user_id, last_digest=now.date().isoformat())
     return sent
 
@@ -277,8 +293,9 @@ def weekly_reports() -> int:
 
 def run_alerts() -> dict:
     stats = {"alerts": 0, "keyword_alerts": 0, "digests": 0, "weekly": 0}
+    from .digests import weekly_briefings
     for key, job in (("alerts", notify_pending), ("keyword_alerts", keyword_alerts),
-                     ("digests", daily_digests), ("weekly", weekly_reports)):
+                     ("digests", daily_digests), ("weekly", weekly_briefings)):
         try:
             stats[key] = job()
         except Exception as exc:

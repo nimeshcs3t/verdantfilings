@@ -77,3 +77,16 @@ def format_filing(row: dict) -> str:
     if credit:
         lines.append(f"<i>{esc(credit)}</i>")
     return "\n".join(lines)
+
+
+def send_document(chat_id: str, filename: str, data: bytes, caption: str = "") -> bool:
+    """Send a file (e.g. the monthly PDF report)."""
+    token = get_secret("TELEGRAM_BOT_TOKEN")
+    if not token or not chat_id:
+        return False
+    try:
+        r = requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={"chat_id": chat_id, "caption": caption[:900]},
+                          files={"document": (filename, data)}, timeout=60)
+        return r.status_code == 200
+    except requests.RequestException:
+        return False

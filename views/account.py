@@ -5,7 +5,7 @@ import streamlit as st
 from core.auth import change_password, update_user
 from core.session import logout
 from core.ui import esc, html_block, page_header
-from services import personal, telegram
+from services import backup, emailer, personal, settings as settings_svc, telegram
 from sources import configured_sources, visible_sources
 
 TIMEZONES = ["UTC", "Asia/Seoul", "Asia/Tokyo", "Asia/Kolkata", "Asia/Singapore", "Asia/Hong_Kong", "Asia/Dubai",
@@ -61,6 +61,9 @@ def page() -> None:
 
     alert_settings(user)
     keyword_settings(user)
+
+    delivery_settings(user)
+    data_section(user)
 
     st.subheader("Appearance", divider=False)
     st.caption("Dark mode follows your phone or computer setting. To choose yourself, open the ⋮ menu at the top "
@@ -135,3 +138,64 @@ def keyword_settings(user: dict) -> None:
         if c2.button("Remove", key=f"kw-{kw['id']}", type="tertiary"):
             personal.remove_keyword(user["id"], kw["id"])
             st.rerun()
+
+
+
+def delivery_settings(user: dict) -> None:
+    prefs = settings_svc.get(user["id"])
+    st.subheader("Email", divider=False)
+    if not emailer.enabled():
+        st.caption("Email isn't set up for this app yet. The admin adds SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD "
+                   "and SMTP_FROM to the secrets (for example a Gmail app password).")
+    with st.form("email-settings", border=False):
+        address = st.text_input("Email address", value=prefs.get("email") or "")
+        c1, c2 = st.columns(2)
+        alerts = c1.checkbox("Filing alerts by email", value=bool(prefs.get("email_alerts")))
+        briefs = c2.checkbox("Digests, briefs and reports by email", value=bool(prefs.get("email_briefs", True)))
+        if st.form_submit_button("Save email settings"):
+            if address and not emailer.valid_address(address):
+                st.warning("That email address doesn't look right.")
+            else:
+                settings_svc.save(user["id"], email=address.strip(), email_alerts=alerts, email_briefs=briefs)
+                st.success("Saved.")
+    if prefs.get("email") and emailer.enabled() and st.button("Send a test email"):
+        ok = emailer.send(prefs["email"], "Verdant Filings test", "<p>Email delivery works.</p>")
+        st.success("Sent. Check your inbox (and spam folder).") if ok else st.error("Couldn't send. Check the SMTP secrets.")
+
+    st.subheader("Briefings and reports", divider=False)
+    with st.form("brief-settings", border=False):
+        c1, c2 = st.columns([1.4, 1])
+        morning = c1.checkbox("Morning brief: overnight filings, your portfolio and today's dates", value=bool(prefs.get("morning_brief")))
+        hour = c2.selectbox("Morning brief time", list(range(4, 12)), index=list(range(4, 12)).index(int(prefs.get("morning_hour") or 7)),
+                            format_func=lambda h: f"{h:02d}:00", help="In the timezone set under Alerts.")
+        weekly = st.checkbox("Weekly AI briefing on Mondays (uses your digest time)", value=bool(prefs.get("weekly_ai", True)))
+        monthly = st.checkbox("Monthly PDF portfolio report on the 1st", value=bool(prefs.get("monthly_pdf", True)))
+        if st.form_submit_button("Save briefings"):
+            settings_svc.save(user["id"], morning_brief=morning, morning_hour=hour, weekly_ai=weekly, monthly_pdf=monthly)
+            if weekly:
+                personal.save_prefs(user["id"], weekly=True)
+            st.success("Saved.")
+
+    st.subheader("Signals", divider=False)
+    from sources import visible_sources
+    markets = {s.country: s.market for s in visible_sources(user)}
+    chosen = [c for c, m in markets.items() if m in (prefs.get("new_listing_markets") or [])]
+    with st.form("signal-settings", border=False):
+        insider = st.checkbox("Insider buying alerts: 2 or more insiders buying within 30 days, or a single US purchase "
+                              "of $1M or more, for companies you follow", value=bool(prefs.get("insider_alerts", True)))
+        listing = st.multiselect("New listing alerts for these markets", list(markets), default=chosen)
+        if st.form_submit_button("Save signals"):
+            settings_svc.save(user["id"], insider_alerts=insider, new_listing_markets=[markets[c] for c in listing])
+            st.success("Saved.")
+
+
+def data_section(user: dict) -> None:
+    st.subheader("Your data", divider=False)
+    st.caption("Download everything you've entered: watchlist, transactions, cash, journal, notes, stars, alerts, fair "
+               "values, goals and settings, as JSON plus CSV files for spreadsheets.")
+    if st.button("Prepare backup", icon=":material/download:"):
+        st.session_state["backup-zip"] = backup.export(user["id"])
+    if st.session_state.get("backup-zip"):
+        from datetime import date
+        st.download_button("Download backup (.zip)", st.session_state["backup-zip"],
+                           file_name=f"verdant-backup-{date.today()}.zip", mime="application/zip", type="primary")

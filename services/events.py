@@ -168,3 +168,38 @@ def kind(label: str) -> str:
     if any(w in low for w in ("dividend", "record", "payment", "ex-", "distribution")):
         return "dividend"
     return "other"
+
+
+def expected_results(pairs: list[tuple[str, str]], start: date, end: date) -> list[dict]:
+    """Results dates for these companies: announced dates where known, otherwise an estimate from the company's own
+    reporting rhythm (about 3 months after the last results if it reports quarterly, 6 if half-yearly)."""
+    if not pairs:
+        return []
+    out, today = [], date.today()
+    confirmed = [e for e in between(pairs, start - timedelta(days=30), end + timedelta(days=30)) if kind(e["label"]) == "results"]
+    out += [{**e, "estimate": False} for e in confirmed if start <= e["event_date"] <= end]
+    with get_engine().connect() as conn:
+        for m, t in pairs:
+            rows = conn.execute(select(filings.c.filed_date, filings.c.title_en, filings.c.title_local, filings.c.company_name,
+                                       filings.c.url).where(filings.c.market == m, filings.c.ticker == t,
+                                                            filings.c.filed_date >= today - timedelta(days=400))
+                                .order_by(filings.c.filed_date)).all()
+            dates = []
+            for d, title_en, title_local, *_ in rows:
+                if categorize(title_en, title_local) in ("earnings", "periodic") and (not dates or (d - dates[-1]).days > 20):
+                    dates.append(d)
+            if not dates:
+                continue
+            gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
+            cadence = 91 if any(60 <= g <= 120 for g in gaps) else 182 if gaps or m in ("AU", "UK", "HK", "IL") else 91
+            nxt = dates[-1] + timedelta(days=cadence)
+            while nxt < today:
+                nxt += timedelta(days=cadence)
+            if not start <= nxt <= end:
+                continue
+            if any(e["market"] == m and e["ticker"] == t and abs((e["event_date"] - nxt).days) <= 25 for e in confirmed):
+                continue        # the company has announced a date; no estimate needed
+            name = rows[-1][3]
+            out.append({"market": m, "ticker": t, "company_name": name, "event_date": nxt, "label": "Results (expected)",
+                        "url": rows[-1][4], "estimate": True})
+    return sorted(out, key=lambda e: e["event_date"])

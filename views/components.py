@@ -40,7 +40,9 @@ def render_filing(f: dict, key: str, show_company: bool = True, link_company: bo
     category = categorize(f.get("title_en"), f.get("title_local"), f.get("price_sensitive"))
     move = prices.move_html(prices.move_on(hist, f["filed_date"])) if hist else ""
     is_starred = bool(stars and f["uid"] in stars)
-    html_block(filing_row_html(f, show_company, is_new, country, category, move, is_starred))
+    from services.importance import score as importance_score
+    html_block(filing_row_html(f, show_company, is_new, country, category, move, is_starred,
+                               important=importance_score(f) >= 75))
     with st.expander("Overview and translation"):
         if f.get("summary_en"):
             _show_enriched(f)
@@ -88,6 +90,17 @@ def _ask_box(f: dict, key: str) -> None:
 
 def _show_enriched(f: dict) -> None:
     html_block(summary_html(f["summary_en"]))
+    try:
+        from services.notes import get as get_notes
+        extra = get_notes(f["uid"])
+    except Exception:
+        extra = {}
+    if extra.get("highlights"):
+        st.caption("Highlights (AI, from this report)")
+        html_block(summary_html(extra["highlights"]))
+    if extra.get("changes"):
+        st.caption("What changed since the previous report (AI)")
+        html_block(summary_html(extra["changes"]))
     if f.get("body_en"):
         st.caption("Machine translation of the opening section")
         html_block(f'<div class="body-en">{esc(f["body_en"])}</div>')

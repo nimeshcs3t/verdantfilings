@@ -142,6 +142,22 @@ reports, tender offers, buyback reports). Exchange announcements on TDnet (earni
 no free API and aren't included. EDINET data is under the Public Data License 1.0: commercial use is
 allowed with the credit line the app shows next to Japanese filings.
 
+## Portfolio, journal and briefings
+
+- **Portfolio tabs:** Overview (returns, chart, heatmap, allocation), Holdings, Cash (deposits, withdrawals, income,
+  fees; value then includes cash and returns use money in and out), Rebalance, Transactions (with broker CSV
+  import), Goals (projection, monthly saving and return needed), Price alerts, Report & share (monthly PDF and a
+  read-only link showing percentages only).
+- **Journal:** dated entries per company (thesis, buy, sell, update, review, lesson) with conviction, tags and review
+  reminders by Telegram or email.
+- **Fair value notes** per company with an alert when the price comes within your chosen %.
+- **Briefings:** morning brief, weekly AI briefing, monthly PDF report; **email delivery** through SMTP secrets.
+- **Signals:** insider buying (2+ insiders within 30 days, or a US purchase of $1M+) and new listings by market.
+- **Importance ranking** of filings, **"What changed"** and **highlights** notes on reports (AI), and estimated
+  **results dates** on the Calendar from each company's reporting rhythm.
+- **Backup:** download all your data as JSON and CSV.
+- **Remember me** uses browser local storage as well as a cookie, so it works on Streamlit Community Cloud.
+
 ## More markets
 
 Each has an on/off secret (GitHub Actions and Streamlit): ENABLE_TDNET (Japan timely disclosures, no key),

@@ -28,7 +28,7 @@ def _price(r) -> str:
     return f"{lo:,.2f} {cur}" if not hi or lo == hi else f"{lo:,.2f}–{hi:,.2f} {cur}"
 
 
-def card(r: dict) -> None:
+def card(r: dict, key: str = "u", stars: set | None = None) -> None:
     sector = r.get("sector") or "Other"
     when = f'{r["listing_date"]:%a %d %b %Y}' if r.get("listing_date") else "date not set"
     move = ""
@@ -53,6 +53,14 @@ def card(r: dict) -> None:
         f'<div class="ipo-facts">' + "".join(f'<span><b>{esc(k)}</b> {esc(v)}</span>' for k, v in facts) + "</div>"
         + (f'<div class="ipo-ov">{esc(r["overview"])}</div>' if r.get("overview") else "")
         + f'<div class="ipo-meta">{esc(r.get("exchange") or "")}{"  ·  " if links else ""}{"  ·  ".join(links)}</div></div>')
+    user = st.session_state.get("user")
+    if user and stars is not None:
+        on = r["uid"] in stars
+        if st.button("Following" if on else "Follow", key=f"ipo-star-{key}-{r['uid']}", type="tertiary",
+                     icon=":material/notifications_active:" if on else ":material/notification_add:",
+                     help="Get updates when it prices, sets or moves its listing date and lists; added to your watchlist after listing."):
+            ipo_svc.toggle_star(user["id"], r["uid"])
+            st.rerun()
 
 
 def calendar_view(rows: list[dict]) -> None:
@@ -122,17 +130,28 @@ def page() -> None:
         f'<div class="stat"><div class="k">{k}</div><div class="v">{v}</div></div>'
         for k, v in (("Upcoming", len(upcoming)), ("Listing in the next 7 days", len(week)), ("Listed recently", len(recent)),
                      ("Countries", len({r.get("country") for r in shown})))) + "</div>")
-    t1, t2, t3 = st.tabs([f"Upcoming ({len(upcoming)})", "Calendar", f"Recently listed ({len(recent)})"])
+    user = st.session_state["user"]
+    stars = ipo_svc.starred(user["id"])
+    following = sorted([r for r in rows if r["uid"] in stars], key=lambda r: r.get("listing_date") or date.max)
+    t1, t2, t3, t4 = st.tabs([f"Upcoming ({len(upcoming)})", "Calendar", f"Recently listed ({len(recent)})",
+                              f"Following ({len(following)})"])
     with t1:
         for r in upcoming[:150]:
-            card(r)
+            card(r, "u", stars)
         if not upcoming:
             st.caption("No upcoming IPOs match these filters.")
     with t2:
         calendar_view(shown)
     with t3:
         for r in recent[:100]:
-            card(r)
+            card(r, "r", stars)
+    with t4:
+        if not following:
+            st.caption("Follow an IPO to get updates when it prices, when its listing date is set or changes, and when it "
+                       "lists. Once listed, it's added to your watchlist automatically (USA, Japan, Hong Kong, Australia).")
+        for r in following:
+            card(r, "f", stars)
+        st.caption("Alerts for new IPOs by country and sector: Account, then Signals.")
     st.caption("Sources: Nasdaq IPO calendar and SEC EDGAR (USA), DART (Korea), JPX (Japan), HKEXnews (Hong Kong), "
                "ASX (Australia). Sector, market cap and overview are read from the official document by AI where "
                "available; check the document before relying on them. Not investment advice.")

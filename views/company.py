@@ -4,7 +4,7 @@ import streamlit as st
 
 from core.ui import esc, html_block, logo_html, page_header, relative_time
 from core.config import direct_fetch
-from services import briefs, chat, events as events_svc, fairvalue, financials, github, insiders, journal as journal_svc, personal, prices, watch
+from services import valuation, briefs, chat, events as events_svc, fairvalue, financials, github, insiders, journal as journal_svc, personal, prices, watch
 from services.classify import ORDER, categorize, label as cat_label
 from services.pipeline import filings_for, get_company, search_companies, sync_company
 from sources import Company, configured_sources, get_source, visible_sources
@@ -112,7 +112,20 @@ def page() -> None:
     if coming:
         html_block('<div class="events">' + "".join(f'<span class="event"><b>{e["event_date"]:%d %b}</b>{esc(e["label"])}</span>'
                                                     for e in coming[:6]) + "</div>")
-    chart = prices.chart_svg(hist, [r["filed_date"] for r in rows])
+    from services.portfolio import currency_for
+    q = valuation.quick_view(market, comp["ticker"], hist, currency_for(market, comp["ticker"]))
+    tiles = [(label, valuation.fmt(q, key, kind)) for label, key, kind in valuation.ROWS if key != "price"]
+    tiles = [t for t in tiles if t[1] != "–"]
+    if tiles:
+        html_block('<div class="qv">' + "".join(f'<div class="stat"><div class="k">{esc(k)}</div><div class="v">{esc(v)}</div></div>'
+                                                for k, v in tiles) + "</div>")
+        if q.get("fin_period"):
+            st.caption(f"Financial figures for {q['fin_period']}; valuation at the last price. Not investment advice.")
+    levels = [(v, label, "target") for v, label in journal_svc.targets(user["id"], market, comp["ticker"])]
+    fv_row = fairvalue.get_all(user["id"]).get((market, comp["ticker"]))
+    if fv_row:
+        levels.append((fv_row["value"], "Fair value", "fair"))
+    chart = prices.chart_svg(hist, [r["filed_date"] for r in rows], days=250, levels=levels)
     if chart:
         html_block(chart)
 

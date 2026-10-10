@@ -108,3 +108,92 @@ def ask_filings(question: str, rows: list[dict]) -> tuple[str, list[dict]]:
         except Exception:
             continue
     return "No answer right now. Add a Gemini key in the app secrets, or try again in a minute.", chosen
+
+
+# ---- questions about the member's own portfolio ---------------------------------------------------------------------
+PORTFOLIO_PROMPT = """You answer questions about the investor's own portfolio, using ONLY the data below. Be concise and
+specific: name holdings, give percentages and figures as shown, and cite filings by their number in square brackets,
+e.g. [3]. If the data doesn't answer the question, say so. Explain facts; don't recommend buying or selling.
+
+Question: {question}
+
+PORTFOLIO (base currency {base}){amount_note}
+{holdings}
+
+RETURNS ON YOUR MONEY: {returns}
+
+UPCOMING DATES:
+{events}
+
+YOUR NOTES (journal theses, targets, fair values):
+{notes}
+
+RECENT FILINGS FROM HOLDINGS (numbered):
+{filings}"""
+
+
+def portfolio_context(user_id: int, show_amounts: bool) -> tuple[str, list[dict]] | None:
+    from datetime import date, timedelta
+    from . import fairvalue, journal, portfolio, valuation
+    from .digests import _filings, snapshot
+    from .events import expected_results, upcoming
+    snap = snapshot(user_id)
+    if not snap:
+        return None
+    rows = [r for r in snap["rows"]]
+    pairs = [(r["market"], r["ticker"]) for r in rows if not r.get("is_cash")]
+    lines = []
+    for r in rows:
+        if r.get("is_cash"):
+            lines.append(f"- Cash {r['currency']}: weight {r['weight'] * 100:.1f}%" + (f", {r['value_base']:,.0f} {snap['base']}" if show_amounts else ""))
+            continue
+        try:
+            q = valuation.quick_view(r["market"], r["ticker"], portfolio.price_history(r["market"], r["ticker"]), r["currency"])
+        except Exception:
+            q = {}
+        extra = ", ".join(f"{label} {valuation.fmt(q, key, kind)}" for label, key, kind in valuation.ROWS
+                          if key in ("pe", "growth", "op_margin", "ret1y", "drawdown") and valuation.fmt(q, key, kind) != "–")
+        lines.append(f"- {r['name']} ({r['ticker']}, {r['country']}, {r['currency']}): weight {r['weight'] * 100:.1f}%, "
+                     f"gain {('%+.1f%%' % (r['gain_pct'] * 100)) if r.get('gain_pct') is not None else 'n/a'}, "
+                     f"today {('%+.1f%%' % (r['day'] * 100)) if r.get('day') is not None else 'n/a'}"
+                     + (f", value {r['value_base']:,.0f} {snap['base']}" if show_amounts and r.get('value_base') else "")
+                     + (f"; {extra}" if extra else ""))
+    rets = ", ".join(f"{r['label']} {r['portfolio'] * 100:+.1f}%" for r in snap.get("money_returns") or [] if r.get("portfolio") is not None)
+    today = date.today()
+    ev = upcoming(pairs, days=60) + [e for e in expected_results(pairs, today, today + timedelta(days=90)) if e.get("estimate")]
+    events = "\n".join(f"- {e['event_date']} {e['company_name']}: {e['label']}" for e in sorted(ev, key=lambda e: e["event_date"])[:30]) or "- none known"
+    notes = []
+    fv = fairvalue.get_all(user_id)
+    for m, t in pairs:
+        if (m, t) in fv:
+            notes.append(f"- {t}: fair value {fv[(m, t)]['value']:,.2f}")
+        for e in journal.entries(user_id, m, t)[:3]:
+            notes.append(f"- {t} {e['kind']} {e['entry_date']}: {e['title'] or ''} {(e['body'] or '')[:200]}"
+                         + (f" (target {e['target_price']:,.2f})" if e.get("target_price") else ""))
+    filings = _filings(pairs, since_date=today - timedelta(days=45))[:40]
+    flist = "\n".join(f"[{i}] {f['filed_date']} {f['company_name']}: {f['title_en']}"
+                      + (f" | {(f.get('summary_en') or '').replace(chr(10), ' ')[:250]}" if f.get("summary_en") else "")
+                      for i, f in enumerate(filings, 1)) or "- none"
+    text = PORTFOLIO_PROMPT.format(question="{question}", base=snap["base"],
+                                   amount_note="" if show_amounts else " (amounts hidden by the investor; use percentages)",
+                                   holdings="\n".join(lines), returns=rets or "n/a", events=events,
+                                   notes="\n".join(notes) or "- none", filings=flist)
+    return text, filings
+
+
+def ask_portfolio(question: str, user_id: int, show_amounts: bool = True) -> tuple[str, list[dict]]:
+    question = " ".join((question or "").split())[:500]
+    if not question:
+        return "Type a question first.", []
+    ctx = portfolio_context(user_id, show_amounts)
+    if not ctx:
+        return "Add some holdings on the Portfolio page first.", []
+    prompt, filings = ctx
+    for provider in (_gemini, _anthropic):
+        try:
+            result = provider(prompt.replace("{question}", question))
+            if result:
+                return result.strip(), filings
+        except Exception:
+            continue
+    return "No answer right now. Add a Gemini key in the app secrets, or try again in a minute.", filings

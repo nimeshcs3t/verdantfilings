@@ -233,7 +233,31 @@ def page() -> None:
         report_tab(user, model)
 
 
+def ask_box(uid: int) -> None:
+    import re
+    from services import ask
+    with st.expander("Ask about my portfolio", icon=":material/forum:"):
+        if not ask.available():
+            st.caption("Add a Gemini key (GEMINI_API_KEY) in the app secrets to ask questions about your portfolio.")
+            return
+        with st.form("ask-portfolio", border=False):
+            q = st.text_input("Question", placeholder="e.g. Which holdings reported results this month, and how did they react?",
+                              label_visibility="collapsed")
+            go = st.form_submit_button("Ask", type="primary")
+        st.caption("Try: What's my exposure to defence? · Which holding is most expensive on P/E? · What's coming up in the next month?")
+        if go and q.strip():
+            with st.spinner("Reading your portfolio"):
+                st.session_state["pf-ask"] = ask.ask_portfolio(q, uid, show_amounts=not _hidden())
+        if st.session_state.get("pf-ask"):
+            answer, used = st.session_state["pf-ask"]
+            link = lambda m: (f'<a href="{esc(used[int(m.group(1)) - 1]["url"])}" target="_blank" rel="noopener noreferrer">[{m.group(1)}]</a>'
+                              if 1 <= int(m.group(1)) <= len(used) else m.group(0))
+            html_block('<div class="answer">' + re.sub(r"\[(\d{1,3})\]", link, esc(answer)).replace("\n", "<br>") + "</div>")
+            st.caption("AI answer from your portfolio data and filings. Check before relying on it. Not investment advice.")
+
+
 def overview(model: dict, base: str, bench_symbol: str | None) -> None:
+    ask_box(st.session_state["user"]["id"])
     c1, c2 = st.columns([1.3, 2], vertical_alignment="center")
     method = c1.segmented_control("Returns", ["On your money", "Time-weighted"], default="On your money", key="pf-method",
                                   help="On your money: gain divided by the money you had in, so it matches your total gain. "

@@ -3,7 +3,7 @@ import streamlit as st
 from core import nav
 from core.plans import watchlist_limit
 from core.ui import esc, html_block, logo_html, page_header
-from services import personal, prices, telegram, watch
+from services import personal, prices, shared, telegram, watch
 from sources import get_source
 
 from .components import add_company_form, histories
@@ -11,7 +11,7 @@ from .components import add_company_form, histories
 LEVELS = {"All filings": "all", "Major only": "major", "Off": "off"}
 
 
-def page() -> None:
+def my_list() -> None:
     user = st.session_state["user"]
     wl = watch.get_watchlist(user["id"])
     limit = watchlist_limit(user["plan"])
@@ -56,3 +56,87 @@ def page() -> None:
         if c5.button("Remove", key=f"r-{w['market']}-{w['ticker']}", width="stretch"):
             watch.remove(user["id"], w["market"], w["ticker"])
             st.rerun()
+
+
+
+def page() -> None:
+    user = st.session_state["user"]
+    lists = shared.lists_for(user["id"])
+    mine, together = st.tabs(["My watchlist", f"Shared lists ({len(lists)})"])
+    with mine:
+        my_list()
+    with together:
+        shared_lists_tab(user, lists)
+
+
+def shared_lists_tab(user: dict, lists: list[dict]) -> None:
+    from datetime import timedelta
+    from services.pipeline import filings_for, get_company
+    st.caption("Lists you share with other members: anyone in a list can add companies with a note, and everyone gets a "
+               "message when something is added. The owner invites members by username.")
+    with st.form("sl-new", clear_on_submit=True, border=False):
+        c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+        name = c1.text_input("New shared list", placeholder="e.g. Korea small caps")
+        if c2.form_submit_button("Create", width="stretch"):
+            err = shared.create(user["id"], name)
+            st.warning(err) if err else st.rerun()
+    if not lists:
+        return
+    names = {f'{l["name"]}{" (yours)" if l["owner_id"] == user["id"] else ""}': l for l in lists}
+    lst = names[st.selectbox("List", list(names), key="sl-pick")]
+    owner = lst["owner_id"] == user["id"]
+    ms = shared.members(lst["id"])
+    st.caption("Members: " + ", ".join(m["username"] + (" (owner)" if m["owner"] else "") for m in ms))
+    mywl = watch.get_watchlist(user["id"])
+    with st.form(f"sl-add-{lst['id']}", clear_on_submit=True, border=True):
+        c1, c2, c3 = st.columns([2, 2, 0.8], vertical_alignment="bottom")
+        opts = {f'{w["name_en"]} ({w["ticker"]})': (w["market"], w["ticker"]) for w in mywl}
+        pick = c1.selectbox("Add from your watchlist", list(opts) or ["(your watchlist is empty)"])
+        note = c2.text_input("Note (optional)", placeholder="why it's interesting")
+        if c3.form_submit_button("Add", width="stretch") and opts:
+            err = shared.add_item(user["id"], lst["id"], *opts[pick], note)
+            st.warning(err) if err else st.rerun()
+    items = shared.items(lst["id"])
+    if not items:
+        st.caption("No companies yet.")
+    watching = {(w["market"], w["ticker"]) for w in mywl}
+    for it in items:
+        comp = get_company(it["market"], it["ticker"], resolve=False) or {"name_en": it["ticker"]}
+        src = get_source(it["market"])
+        recent = len(filings_for([(it["market"], it["ticker"])], src.today() - timedelta(days=7))) if src else 0
+        c1, c2, c3 = st.columns([5, 1.2, 0.8], vertical_alignment="center")
+        c1.markdown(f'<div class="fl-co">{logo_html(comp["name_en"], it["ticker"], market=it["market"])}{esc(comp["name_en"])}'
+                    f'<span class="fl-tk">{esc(it["ticker"])}</span><span class="fl-tk">{esc(src.country if src else "")}</span>'
+                    f'<span class="fl-tk">{recent} filings this week</span></div>'
+                    f'<div class="fl-orig">added by {esc(it.get("username") or "?")}{": " + esc(it["note"]) if it.get("note") else ""}</div>',
+                    unsafe_allow_html=True)
+        if (it["market"], it["ticker"]) not in watching:
+            if c2.button("Add to mine", key=f"sl-take-{lst['id']}-{it['market']}-{it['ticker']}", width="stretch"):
+                _, err = watch.add(user, it["market"], it["ticker"])
+                st.warning(err) if err else st.rerun()
+        else:
+            c2.caption("On your watchlist")
+        if c3.button("Remove", key=f"sl-rm-{lst['id']}-{it['market']}-{it['ticker']}", type="tertiary"):
+            shared.remove_item(user["id"], lst["id"], it["market"], it["ticker"])
+            st.rerun()
+    st.divider()
+    if owner:
+        with st.form(f"sl-inv-{lst['id']}", clear_on_submit=True, border=False):
+            c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+            who = c1.text_input("Invite a member by username")
+            if c2.form_submit_button("Invite", width="stretch"):
+                err = shared.invite(user["id"], lst["id"], who)
+                st.warning(err) if err else st.rerun()
+        others = [m for m in ms if not m["owner"]]
+        if others:
+            c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+            gone = c1.selectbox("Remove a member", [m["username"] for m in others], key=f"sl-kick-{lst['id']}")
+            if c2.button("Remove member", key=f"sl-kick-b-{lst['id']}", width="stretch"):
+                shared.remove_member(user["id"], lst["id"], next(m["id"] for m in others if m["username"] == gone))
+                st.rerun()
+        if st.button("Delete this list", key=f"sl-del-{lst['id']}", type="tertiary"):
+            shared.delete_list(user["id"], lst["id"])
+            st.rerun()
+    elif st.button("Leave this list", key=f"sl-leave-{lst['id']}", type="tertiary"):
+        shared.remove_member(user["id"], lst["id"], user["id"])
+        st.rerun()

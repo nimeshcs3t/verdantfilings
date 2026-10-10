@@ -315,6 +315,11 @@ def retranslate_titles(limit: int = 200) -> int:
     return fixed
 
 
+def _refresh_prices() -> int:
+    from .prices import refresh_cache
+    return refresh_cache()
+
+
 def _fair_value_alerts() -> int:
     from . import deliver, fairvalue, portfolio
     return sum(deliver.send(uid, "Fair value alert", text) for uid, text in fairvalue.check(portfolio.price_history))
@@ -373,7 +378,7 @@ def run_once() -> dict:
                  ("fair_value", _fair_value_alerts, 30), ("journal", journal.send_reminders, 60),
                  ("report_notes", notes.refresh, 60), ("insider_alerts", signals.send_insider_alerts, 60),
                  ("new_listings", signals.send_new_listing_alerts, 360), ("morning", digests.morning_briefs, 0),
-                 ("monthly", digests.monthly_reports, 0), ("ipos", ipos.refresh, 240), ("ipo_details", ipos.enrich, 30)]
+                 ("monthly", digests.monthly_reports, 0), ("ipos", ipos.refresh, 240), ("ipo_details", ipos.enrich, 30), ("prices", _refresh_prices, 60), ("ipo_alerts", ipos.send_alerts, 30)]
         for key, step, every in steps:
             if every and not _due(f"job:{key}", every):
                 continue

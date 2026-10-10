@@ -9,7 +9,7 @@ from core.db import get_engine, user_settings
 
 DEFAULTS = {"email": "", "email_alerts": False, "email_briefs": True, "morning_brief": False, "morning_hour": 7,
             "weekly_ai": True, "monthly_pdf": True, "insider_alerts": True, "new_listing_markets": [],
-            "importance_sort": False}
+            "importance_sort": False, "ipo_alert_countries": [], "ipo_alert_sectors": [], "report_theme": "light"}
 
 
 def get(user_id: int) -> dict:

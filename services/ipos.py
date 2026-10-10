@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy import and_, delete, insert, or_, select, update
 
 from core.config import get_secret
-from core.db import get_engine, ipos, utcnow
+from core.db import get_engine, ipo_stars, ipos, utcnow
 from sources.webhttp import PoliteClient
 
 log = logging.getLogger(__name__)
@@ -447,3 +447,86 @@ def listing(start: date | None = None, end: date | None = None) -> list[dict]:
         rows = [r for r in rows if r.get("listing_date") and (not start or r["listing_date"] >= start)
                 and (not end or r["listing_date"] <= end)]
     return rows
+
+
+
+# ---- following IPOs and alerts ---------------------------------------------------------------------------------------
+def starred(user_id: int) -> set[str]:
+    with get_engine().connect() as conn:
+        return set(conn.execute(select(ipo_stars.c.uid).where(ipo_stars.c.user_id == user_id)).scalars())
+
+
+def toggle_star(user_id: int, uid: str) -> bool:
+    with get_engine().begin() as conn:
+        if conn.execute(delete(ipo_stars).where(ipo_stars.c.user_id == user_id, ipo_stars.c.uid == uid)).rowcount:
+            return False
+        row = conn.execute(select(ipos.c.status, ipos.c.listing_date).where(ipos.c.uid == uid)).first()
+        conn.execute(insert(ipo_stars).values(user_id=user_id, uid=uid, last_status=row[0] if row else None,
+                                              last_date=row[1] if row else None, moved=False))
+        return True
+
+
+def _line(r: dict) -> str:
+    import html as h
+    when = f'{r["listing_date"]:%d %b}' if r.get("listing_date") else "date not set"
+    price = ""
+    if r.get("price_low"):
+        price = f', {r["price_low"]:,.2f}' + (f'–{r["price_high"]:,.2f}' if r.get("price_high") and r["price_high"] != r["price_low"] else "") + f' {r.get("currency") or ""}'
+    link = f' <a href="{h.escape(r["doc_url"])}">document</a>' if r.get("doc_url") else ""
+    return (f'• <b>{h.escape(r["name"])}</b> {h.escape(r.get("ticker") or "")} ({h.escape(r.get("country") or "")}, '
+            f'{h.escape(r.get("sector") or "Other")}): lists {when}{price}{link}')
+
+
+def send_alerts() -> int:
+    """Worker: new IPOs matching a member's countries/sectors, and changes to IPOs they follow."""
+    from core.auth import get_user
+    from . import deliver, settings, watch
+    from .signals import once
+    from core.db import user_settings
+    sent = 0
+    today = date.today()
+    with get_engine().connect() as conn:
+        rows = {r["uid"]: dict(r) for r in conn.execute(select(ipos)).mappings()}
+        members = set(conn.execute(select(user_settings.c.user_id).where(user_settings.c.key == "ipo_alert_countries")).scalars())
+        stars = [dict(r) for r in conn.execute(select(ipo_stars)).mappings()]
+    # 1) new IPOs (wait until details are read, or a day has passed, so the sector is known)
+    for uid in members:
+        prefs = settings.get(uid)
+        countries, sectors = prefs.get("ipo_alert_countries") or [], prefs.get("ipo_alert_sectors") or []
+        if not countries:
+            continue
+        fresh = [r for r in rows.values() if r.get("country") in countries and (not sectors or (r.get("sector") or "Other") in sectors)
+                 and r.get("first_seen") and r["first_seen"] >= today - timedelta(days=3)
+                 and (r.get("ai_done") or r["first_seen"] < today) and once(f"ipo:{uid}:{r['uid']}")]
+        if fresh:
+            sent += deliver.send(uid, "New IPOs", "<b>New IPOs</b>\n" + "\n".join(_line(r) for r in fresh[:25]))
+    # 2) followed IPOs: price set, date set or changed, listed (with first-day move); move to the watchlist once listed
+    for s in stars:
+        r = rows.get(s["uid"])
+        if not r:
+            continue
+        notes = []
+        if r.get("status") != s.get("last_status") and r.get("status") in ("priced", "listed"):
+            notes.append("has priced" if r["status"] == "priced" else "is now listed")
+        if r.get("listing_date") and r["listing_date"] != s.get("last_date"):
+            notes.append(f'listing date {"set to" if not s.get("last_date") else "moved to"} {r["listing_date"]:%d %b %Y}')
+        if r.get("first_day") is not None and once(f"ipofd:{s['user_id']}:{r['uid']}"):
+            notes.append(f'first day {r["first_day"] * 100:+.1f}% vs offer price')
+        if notes:
+            sent += deliver.send(s["user_id"], f'IPO update: {r["name"]}', f'<b>IPO update</b>\n{_line(r)}\n' + "; ".join(notes).capitalize() + ".")
+        moved = s.get("moved")
+        if not moved and r.get("status") == "listed" and r.get("ticker") and r["market"] in ("US", "JP", "HK", "AU"):
+            user = get_user(s["user_id"])
+            try:
+                ticker = r["ticker"].zfill(4) if r["market"] == "HK" else r["ticker"]
+                _, err = watch.add(user, r["market"], ticker) if user else (None, "no user")
+                moved = err is None or "already" in (err or "").lower()
+            except Exception:
+                moved = False
+            if moved:
+                sent += deliver.send(s["user_id"], f'{r["name"]} added to your watchlist',
+                                     f'<b>{r["name"]}</b> has listed and was added to your watchlist, so its filings will now appear.')
+        with get_engine().begin() as conn:
+            conn.execute(update(ipo_stars).where(ipo_stars.c.user_id == s["user_id"], ipo_stars.c.uid == s["uid"])
+                         .values(last_status=r.get("status"), last_date=r.get("listing_date"), moved=bool(moved)))
+    return sent

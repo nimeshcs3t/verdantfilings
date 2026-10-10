@@ -18,8 +18,9 @@ def page() -> None:
     if me["role"] != "admin":
         st.error("Admins only.")
         return
-    page_header("Admin", "Health, members, plans and data.")
+    page_header("Admin", "Health, sources, members, plans and data.")
     health_panel()
+    sources_panel()
 
     with get_engine().connect() as conn:
         counts = {name: conn.execute(select(func.count()).select_from(t)).scalar_one()
@@ -145,3 +146,33 @@ def health_panel() -> None:
     if c2.button("Clean up now", width="stretch"):
         removed = housekeeping.cleanup(force=True)
         st.success("Removed: " + (", ".join(f"{k} {v}" for k, v in removed.items()) if removed else "nothing to remove"))
+
+
+
+STATE = {"ok": ("●", "var(--up)", "Working"), "warning": ("●", "var(--amber)", "Recent error"),
+         "problem": ("●", "var(--down)", "Not updating"), "paused": ("●", "var(--amber)", "Paused"), "idle": ("○", "var(--muted)", "No companies")}
+
+
+def sources_panel() -> None:
+    from services import status
+    st.subheader("Sources", divider=False)
+    rows = status.markets()
+    lines = []
+    for r in rows:
+        dot, colour, label = STATE[r["state"]]
+        note = (f"paused until {r['paused']:%d %b %H:%M} UTC" if r["paused"] else (r["error"] or ""))
+        lines.append(f'<tr><td><span style="color:{colour}">{dot}</span> {esc(r["country"])} <span class="fl-tk">{esc(r["source"])}</span></td>'
+                     f'<td>{esc(label)}</td><td class="num">{esc(relative_time(r["last_ok"])) if r["last_ok"] else "–"}</td>'
+                     f'<td class="num">{esc(relative_time(r["newest"])) if r["newest"] else "–"}</td>'
+                     f'<td class="num">{r["week"]}</td><td class="num opt">{r["followed"]}</td><td class="num opt">{r["listed"] or "–"}</td>'
+                     f'<td class="opt" style="font-size:.78rem;color:var(--muted)">{esc(note)[:140]}</td></tr>')
+    html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Market</th><th>Status</th><th class="num">Last checked</th>'
+               '<th class="num">Newest filing</th><th class="num">Filings 7d</th><th class="num opt">Companies</th>'
+               f'<th class="num opt">Listed</th><th class="opt">Note</th></tr>{"".join(lines)}</table></div>')
+    problems = [r for r in rows if r["state"] in ("problem", "paused")]
+    if problems:
+        st.warning("Needs a look: " + ", ".join(r["country"] for r in problems) + ". Paused sources resume by themselves; "
+                   "a market 'not updating' for a day may mean its website changed.")
+    ipo_rows = status.ipo_sources()
+    st.caption("IPO sources: " + "  ·  ".join(
+        f"{STATE[r['state']][0]} {r['country']} ({r['count']}, {relative_time(r['last_ok']) if r['last_ok'] else 'not yet'})" for r in ipo_rows))

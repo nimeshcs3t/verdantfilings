@@ -176,7 +176,8 @@ def monthly_pdf(user_id: int) -> tuple[str, bytes] | None:
     user = None
     with get_engine().connect() as conn:
         user = conn.execute(select(users.c.username).where(users.c.id == user_id)).scalar()
-    data = report_pdf.build(month_end, snap["base"], snap, month_filings, sorted(nxt, key=lambda e: e["event_date"]), user or "")
+    theme = settings.get(user_id).get("report_theme") or "light"
+    data = report_pdf.build(month_end, snap["base"], snap, month_filings, sorted(nxt, key=lambda e: e["event_date"]), user or "", theme)
     return f"verdant-report-{month_end:%Y-%m}.pdf", data
 
 

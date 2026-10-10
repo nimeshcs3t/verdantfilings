@@ -25,8 +25,21 @@ def _money(v, cur) -> str:
     return "-" if v is None else f"{v:,.0f} {cur}"
 
 
+THEMES = {"light": {"bg": None, "ink": (27, 36, 48), "rule": (227, 231, 229), "pine": PINE, "up": UP, "down": DOWN},
+          "dark": {"bg": (15, 20, 19), "ink": (228, 233, 230), "rule": (52, 62, 58), "pine": (93, 190, 147),
+                   "up": (92, 203, 138), "down": (242, 131, 122)}}
+
+
 class Report(FPDF):
+    def __init__(self, theme: str = "light", **kw):
+        super().__init__(**kw)
+        t = THEMES.get(theme, THEMES["light"])
+        self.bg, self.ink, self.rule, self.pine, self.up, self.down = t["bg"], t["ink"], t["rule"], t["pine"], t["up"], t["down"]
+
     def header(self):
+        if self.bg:                          # dark theme: fill the page first
+            self.set_fill_color(*self.bg)
+            self.rect(0, 0, self.w, self.h, "F")
         self.set_font("Helvetica", "B", 9)
         self.set_text_color(*MUTED)
         self.cell(0, 6, "Verdant Filings - monthly portfolio report", align="R")
@@ -39,12 +52,13 @@ class Report(FPDF):
         self.cell(0, 6, f"Page {self.page_no()}. Prices from free sources; not investment advice.", align="C")
 
 
-def build(month_end: date, base: str, model: dict, filings: list[dict], upcoming: list[dict], name: str = "") -> bytes:
-    pdf = Report(format="A4")
+def build(month_end: date, base: str, model: dict, filings: list[dict], upcoming: list[dict], name: str = "",
+          theme: str = "light") -> bytes:
+    pdf = Report(theme=theme, format="A4")
     pdf.set_auto_page_break(True, margin=16)
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 20)
-    pdf.set_text_color(27, 36, 48)
+    pdf.set_text_color(*pdf.ink)
     pdf.cell(0, 10, _t(f"{month_end:%B %Y}"), new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(*MUTED)
@@ -59,7 +73,7 @@ def build(month_end: date, base: str, model: dict, filings: list[dict], upcoming
              ("This month", _pct((returns.get("1M") or {}).get("portfolio"))),
              ("Year to date", _pct((returns.get("YTD") or {}).get("portfolio")))]
     w = (pdf.w - pdf.l_margin - pdf.r_margin) / 4
-    pdf.set_draw_color(227, 231, 229)
+    pdf.set_draw_color(*pdf.rule)
     y = pdf.get_y()
     for i, (k, v) in enumerate(tiles):
         x = pdf.l_margin + i * w
@@ -70,7 +84,7 @@ def build(month_end: date, base: str, model: dict, filings: list[dict], upcoming
         pdf.cell(w - 6, 4, _t(k))
         pdf.set_xy(x + 2, y + 8)
         pdf.set_font("Helvetica", "B", 11)
-        pdf.set_text_color(27, 36, 48)
+        pdf.set_text_color(*pdf.ink)
         pdf.cell(w - 6, 6, _t(v))
     pdf.set_y(y + 23)
     bench = (returns.get("1M") or {}).get("benchmark")
@@ -82,9 +96,9 @@ def build(month_end: date, base: str, model: dict, filings: list[dict], upcoming
     def section(title):
         pdf.ln(3)
         pdf.set_font("Helvetica", "B", 12)
-        pdf.set_text_color(*PINE)
+        pdf.set_text_color(*pdf.pine)
         pdf.cell(0, 7, _t(title), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_text_color(27, 36, 48)
+        pdf.set_text_color(*pdf.ink)
 
     def table(headers, rows, widths, aligns):
         pdf.set_font("Helvetica", "B", 8)
@@ -95,7 +109,7 @@ def build(month_end: date, base: str, model: dict, filings: list[dict], upcoming
         pdf.set_font("Helvetica", "", 9)
         for row in rows:
             for (value, colour), wd, a in zip(row, widths, aligns):
-                pdf.set_text_color(*(colour or (27, 36, 48)))
+                pdf.set_text_color(*(colour or pdf.ink))
                 pdf.cell(wd, 6, _t(value)[:60], align=a)
             pdf.ln()
 
@@ -103,7 +117,7 @@ def build(month_end: date, base: str, model: dict, filings: list[dict], upcoming
     rows = model["rows"][:15]
     table(["Company", "Value", "Weight", "Gain", "Last day"],
           [[(f"{r['name']} ({r['ticker']})", None), (_money(r["value_base"], base), None), (f"{r['weight'] * 100:.1f}%", None),
-            (_pct(r.get("gain_pct")), UP if (r.get("gain_pct") or 0) >= 0 else DOWN), (_pct(r.get("day")), None)] for r in rows],
+            (_pct(r.get("gain_pct")), pdf.up if (r.get("gain_pct") or 0) >= 0 else pdf.down), (_pct(r.get("day")), None)] for r in rows],
           [78, 34, 20, 24, 24], ["L", "R", "R", "R", "R"])
 
     by_country: dict[str, float] = {}

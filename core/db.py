@@ -212,6 +212,7 @@ company_meta = Table(
     Column("insider_updated", DateTime(timezone=True)),
     Column("brief", Text),
     Column("brief_updated", DateTime(timezone=True)),
+    Column("shares", Float),                            # shares outstanding (for market cap and ratios)
 )
 
 insider_tx = Table(
@@ -355,6 +356,7 @@ journal = Table(
     Column("title", String(200)),
     Column("body", Text),
     Column("conviction", Integer),                      # 1-5
+    Column("target_price", Float),                      # optional price target, drawn on the company chart
     Column("tags", String(200)),
     Column("review_on", Date),
     Column("reminded", Boolean, nullable=False, default=False),
@@ -453,8 +455,63 @@ ipos = Table(
     Index("ix_ipos_date", "listing_date"),
 )
 
+ipo_stars = Table(
+    "ipo_stars", metadata,                  # IPOs a member follows into listing
+    Column("user_id", Integer, primary_key=True),
+    Column("uid", String(80), primary_key=True),
+    Column("last_status", String(12)),
+    Column("last_date", Date),
+    Column("moved", Boolean, nullable=False, default=False),   # added to the watchlist after listing
+)
+
+price_cache = Table(
+    "price_cache", metadata,                # daily closes stored by the background job, read by the website
+    Column("key", String(40), primary_key=True),        # MARKET:TICKER, SYM:SPY, FX:AUD
+    Column("data", Text, nullable=False),               # JSON [[iso date, close], ...]
+    Column("updated_at", DateTime(timezone=True), default=utcnow),
+)
+
+shared_lists = Table(
+    "shared_lists", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("owner_id", Integer, nullable=False),
+    Column("name", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+)
+
+shared_list_members = Table(
+    "shared_list_members", metadata,
+    Column("list_id", Integer, primary_key=True),
+    Column("user_id", Integer, primary_key=True),
+)
+
+shared_list_items = Table(
+    "shared_list_items", metadata,
+    Column("list_id", Integer, primary_key=True),
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("added_by", Integer),
+    Column("note", String(200)),
+    Column("added_at", DateTime(timezone=True), default=utcnow),
+)
+
+# Columns added after a table first existed: (table, column, SQL type). Added on start-up if missing.
+UPGRADES = [("journal", "target_price", "FLOAT"), ("company_meta", "shares", "FLOAT")]
+
 _engine: Engine | None = None
 _lock = threading.Lock()
+
+
+def _upgrade(engine: Engine) -> None:
+    from sqlalchemy import inspect, text
+    try:
+        inspector = inspect(engine)
+        for table, column, sql_type in UPGRADES:
+            if column not in {c["name"] for c in inspector.get_columns(table)}:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
+    except Exception:
+        pass
 
 
 def get_engine() -> Engine:
@@ -472,5 +529,6 @@ def get_engine() -> Engine:
                     kwargs.update(pool_size=5, max_overflow=5, pool_recycle=1800)
                 engine = create_engine(url, **kwargs)
                 metadata.create_all(engine)
+                _upgrade(engine)
                 _engine = engine
     return _engine

@@ -32,13 +32,15 @@ def entry_form(uid: int, preset: tuple[str, str] | None = None, key: str = "j") 
         title = st.text_input("Title", placeholder="e.g. Why I'm buying: margin recovery and buybacks")
         body = st.text_area("Notes", height=150, placeholder="Your reasoning, what would prove you wrong, price levels, "
                                                              "what to watch in the next results...")
-        c4, c5, c6 = st.columns([1.2, 1.4, 1.2])
+        c4, c5, c6, c7 = st.columns([1.2, 1.2, 1, 1.1])
         conviction = c4.slider("Conviction", 1, 5, 3)
         tags = c5.text_input("Tags", placeholder="e.g. dividend, turnaround")
-        review = c6.date_input("Review on (optional)", value=None, min_value=date.today())
+        target = c6.number_input("Price target", min_value=0.0, value=0.0, step=1.0,
+                                 help="Optional, in the share's trading currency. Drawn on the company's price chart.")
+        review = c7.date_input("Review on (optional)", value=None, min_value=date.today())
         if st.form_submit_button("Save entry", type="primary"):
             market, ticker = companies[company]
-            err = journal.add(uid, market, ticker, day, kind, title, body, conviction, tags, review)
+            err = journal.add(uid, market, ticker, day, kind, title, body, conviction, tags, review, target or None)
             st.warning(err) if err else (st.toast("Saved to your journal"), st.rerun())
 
 
@@ -50,6 +52,8 @@ def entry_card(e: dict, show_company: bool = True, key: str = "j") -> None:
         name = (f'<div class="fl-co">{logo_html(comp.get("name_en", e["ticker"]), e["ticker"], market=e["market"])}'
                 f'{esc(comp.get("name_en", e["ticker"]))}<span class="fl-tk">{esc(e["ticker"])}</span></div>')
     stars = "●" * (e["conviction"] or 0) + "○" * (5 - (e["conviction"] or 0)) if e["conviction"] else ""
+    if e.get("target_price"):
+        stars += f"  Target {e['target_price']:,.2f}"
     tags = "".join(f'<span class="chip c-other">{esc(t.strip())}</span>' for t in (e["tags"] or "").split(",") if t.strip())
     review = ""
     if e["review_on"]:

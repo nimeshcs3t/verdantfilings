@@ -49,9 +49,21 @@ def _number(text) -> float | None:
 
 
 # ---- fetching ---------------------------------------------------------------------------
+LAST_SHARES: list = [None]       # shares outstanding found by the latest fetch (for market cap and ratios)
+
+
 def fetch_kr(corp_code: str, this_year: int) -> list[dict]:
     src = get_source("KR")
     rows = []
+    for year in (this_year - 1, this_year - 2):
+        try:
+            data = src._json("stockTotqySttus.json", corp_code=corp_code, bsns_year=str(year), reprt_code="11011")
+        except Exception:
+            break
+        common = next((i for i in data.get("list", []) if "보통" in (i.get("se") or "")), None) if data.get("status") == "000" else None
+        if common and _number(common.get("istc_totqy")):
+            LAST_SHARES[0] = _number(common.get("istc_totqy"))
+            break
     for year in range(this_year - 1, this_year - 6, -1):
         data = src._json("fnlttSinglAcnt.json", corp_code=corp_code, bsns_year=str(year), reprt_code="11011")
         if data.get("status") != "000":
@@ -72,6 +84,9 @@ def fetch_kr(corp_code: str, this_year: int) -> list[dict]:
 def fetch_us(cik: str) -> list[dict]:
     src = get_source("US")
     facts = src._get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{int(cik):010d}.json").json().get("facts", {})
+    shares = (((facts.get("dei") or {}).get("EntityCommonStockSharesOutstanding") or {}).get("units") or {}).get("shares") or []
+    if shares:
+        LAST_SHARES[0] = _number(sorted(shares, key=lambda e: e.get("end") or "")[-1].get("val"))
     series: dict[tuple[str, str], dict] = {}
     currency = "USD"
     for key, tags in US_TAGS.items():
@@ -110,6 +125,16 @@ def fetch_tw(ticker: str) -> list[dict]:
             except Exception:
                 continue
         _TW_CACHE.update(rows=rows, at=__import__("time").time())
+    try:
+        from sources import get_source as _gs
+        src_tw = _gs("TW")
+        listing = _TW_CACHE.get("list") or requests.get("https://openapi.twse.com.tw/v1/opendata/t187ap03_L", timeout=60).json()
+        _TW_CACHE["list"] = listing
+        info = next((c for c in listing if str(c.get("公司代號") or "").strip() == ticker), None)
+        if info and _number(info.get("已發行普通股數或TDR原股發行股數")):
+            LAST_SHARES[0] = _number(info.get("已發行普通股數或TDR原股發行股數"))
+    except Exception:
+        pass
     rec = next((r for r in _TW_CACHE["rows"] if str(r.get("公司代號") or "").strip() == ticker), None)
     if not rec:
         return []
@@ -171,6 +196,10 @@ def fetch_esef(lei: str) -> list[dict]:
             dims = f.get("dimensions") or {}
             if set(dims) - {"concept", "entity", "period", "unit", "language"}:
                 continue          # skip breakdowns by segment, region and so on
+            if dims.get("concept") in ("ifrs-full:NumberOfSharesOutstanding", "ifrs-full:NumberOfSharesIssued",
+                                       "ifrs-full:WeightedAverageShares") and _number(f.get("value")):
+                if LAST_SHARES[0] is None or dims["concept"] != "ifrs-full:WeightedAverageShares":
+                    LAST_SHARES[0] = _number(f.get("value"))
             key = next((k for k, names in ESEF_CONCEPTS.items() if dims.get("concept") in names), None)
             span = str(dims.get("period") or "").split("/")
             if not key or len(span) != 2:
@@ -224,6 +253,7 @@ def refresh(limit: int = 6) -> int:
                 due.append((last or utcnow() - timedelta(days=9999), market, ticker, source_id, name))
     done = 0
     for _, market, ticker, source_id, name in sorted(due)[:limit]:
+        LAST_SHARES[0] = None
         try:
             if market == "KR":
                 rows = fetch_kr(source_id, get_source("KR").today().year)
@@ -249,7 +279,7 @@ def refresh(limit: int = 6) -> int:
                 conn.execute(insert(financials).values(market=market, ticker=ticker, kind=r["kind"], period=r["period"],
                                                        revenue=r.get("revenue"), op_income=r.get("op_income"),
                                                        net_income=r.get("net_income"), currency=r.get("currency")))
-        touch_meta(market, ticker, fin_updated=utcnow())
+        touch_meta(market, ticker, fin_updated=utcnow(), **({"shares": LAST_SHARES[0]} if LAST_SHARES[0] else {}))
         done += 1
     return done
 

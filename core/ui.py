@@ -209,6 +209,12 @@ def css() -> str:
 .ipo-meta {{ font-size:.82rem; color:var(--muted); }}
 .ipo-meta a {{ color:var(--pine); text-decoration:none; font-weight:500; }}
 .ipo .mv {{ margin-left:8px; }}
+.chart .lvl {{ stroke-width:1.4; stroke-dasharray:6 4; vector-effect:non-scaling-stroke; }}
+.chart .lvl.target {{ stroke:var(--up); }} .chart .lvl.fair {{ stroke:var(--amber); }}
+.lvl-key {{ display:inline-block; margin-right:12px; font-weight:600; }}
+.lvl-key.target {{ color:var(--up); }} .lvl-key.fair {{ color:var(--amber); }}
+.qv {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(118px, 1fr)); gap:8px; margin:4px 0 12px; }}
+.qv .stat .v {{ font-size:1.02rem; }}
 .empty {{ border:1px dashed var(--rule); padding:18px 20px; color:var(--muted); margin:8px 0 16px; border-radius:6px; }}
 .brand {{ font-size:2.2rem; font-weight:700; letter-spacing:-0.02em; color:var(--ink); margin:3rem 0 .3rem; }}
 .st-key-bottomnav {{ display:none !important; }}

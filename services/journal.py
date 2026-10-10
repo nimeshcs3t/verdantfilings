@@ -20,13 +20,14 @@ def entries(user_id: int, market: str | None = None, ticker: str | None = None) 
 
 
 def add(user_id: int, market: str | None, ticker: str | None, entry_date: date, kind: str, title: str, body: str,
-        conviction: int | None, tags: str, review_on: date | None) -> str | None:
+        conviction: int | None, tags: str, review_on: date | None, target_price: float | None = None) -> str | None:
     if kind not in KINDS or not (title or body).strip():
         return "Add a title or some text."
     with get_engine().begin() as conn:
         conn.execute(insert(journal).values(user_id=user_id, market=market, ticker=ticker, entry_date=entry_date, kind=kind,
                                             title=(title or "")[:200], body=(body or "")[:20000],
                                             conviction=conviction, tags=(tags or "")[:200], review_on=review_on,
+                                            target_price=target_price if target_price and target_price > 0 else None,
                                             reminded=False))
     return None
 
@@ -74,3 +75,14 @@ def stats(rows: list[dict]) -> dict:
     return {"entries": len(rows), "companies": len({(r["market"], r["ticker"]) for r in rows if r["ticker"]}),
             "by_kind": by_kind, "avg_conviction": (sum(convictions) / len(convictions)) if convictions else None,
             "reviews_due": sum(1 for r in rows if r.get("review_on") and r["review_on"] <= date.today() and not r["reminded"])}
+
+
+
+def targets(user_id: int, market: str, ticker: str) -> list[tuple[float, str]]:
+    """Price targets from journal entries, newest first, one per entry type."""
+    out, seen = [], set()
+    for e in entries(user_id, market, ticker):
+        if e.get("target_price") and e["kind"] not in seen:
+            seen.add(e["kind"])
+            out.append((e["target_price"], f"{KINDS.get(e['kind'], e['kind'])} target ({e['entry_date']:%b %Y})"))
+    return out[:3]

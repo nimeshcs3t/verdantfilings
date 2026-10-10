@@ -28,6 +28,8 @@ def page() -> None:
     cats = c4.pills("Categories", [label(k) for k in ORDER], selection_mode="multi", key="s-cats",
                     label_visibility="collapsed")
     only_starred = c5.toggle("Starred only", key="s-starred")
+    if len(text.strip()) >= 2:
+        everywhere(user, text.strip())
 
     market = markets.get(country)
     days = PERIODS[period]
@@ -102,3 +104,55 @@ def ask_box(user: dict) -> None:
                     f'<a href="{esc(used[i - 1]["url"])}" target="_blank" rel="noopener noreferrer">'
                     f'{esc(used[i - 1]["title_en"])}</a></div>' for i in cited))
             st.caption("AI answer from filing titles and overviews. Check the sources before relying on it.")
+
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _company_hits(q: str, markets: tuple) -> list[tuple[str, str, str, str]]:
+    from services.pipeline import search_companies
+    from sources import get_source
+    out = []
+    for m in markets:
+        src = get_source(m)
+        if src is None or src.resolve_in_app:      # skip live lookups here; they're on the Watchlist page
+            continue
+        try:
+            out += [(c.market, c.ticker, c.name_en, src.country) for c in search_companies(m, q)[:3]]
+        except Exception:
+            continue
+    return out[:12]
+
+
+def everywhere(user: dict, q: str) -> None:
+    """Companies, IPOs, journal entries and notes matching the words, above the filings."""
+    from core import nav
+    from core.db import get_engine, notes
+    from sqlalchemy import select
+    from services import ipos as ipo_svc, journal
+    low = q.lower()
+    companies = _company_hits(q, tuple(sorted(s.market for s in visible_sources(user))))
+    ipo_rows = [r for r in ipo_svc.listing() if low in f'{r["name"]} {r.get("ticker") or ""} {r.get("name_local") or ""} {r.get("sector") or ""}'.lower()][:6]
+    entries = [e for e in journal.entries(user["id"]) if low in f"{e['title']} {e['body']} {e['tags']} {e['ticker'] or ''}".lower()][:6]
+    with get_engine().connect() as conn:
+        mine = [dict(r) for r in conn.execute(select(notes).where(notes.c.user_id == user["id"])).mappings()
+                if low in (r["body"] or "").lower() or low == (r["ticker"] or "").lower()][:6]
+    if not (companies or ipo_rows or entries or mine):
+        return
+    with st.container(border=True):
+        if companies:
+            st.markdown("**Companies**")
+            cols = st.columns(3)
+            for i, (m, t, name, country) in enumerate(companies):
+                if cols[i % 3].button(f"{name} ({t}, {country})", key=f"ev-co-{m}-{t}", type="tertiary"):
+                    nav.open_company(m, t)
+        if ipo_rows:
+            st.markdown("**IPOs**")
+            html_block("".join(f'<div class="ev-row"><b>{(r["listing_date"].strftime("%d %b") if r.get("listing_date") else "TBA")}</b>'
+                               f'{esc(r["name"])} <span>{esc(r.get("country") or "")}, {esc(r.get("sector") or "")}</span></div>' for r in ipo_rows))
+        if entries:
+            st.markdown("**Your journal**")
+            html_block("".join(f'<div class="ev-row"><b>{e["entry_date"]:%d %b %Y}</b>{esc(e["ticker"] or "General")}: '
+                               f'{esc(e["title"] or (e["body"] or "")[:80])}</div>' for e in entries))
+        if mine:
+            st.markdown("**Your company notes**")
+            html_block("".join(f'<div class="ev-row"><b>{esc(n["ticker"])}</b>{esc((n["body"] or "")[:140])}</div>' for n in mine))

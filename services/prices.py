@@ -72,7 +72,7 @@ def symbol_for_isin(isin: str, exchanges: tuple[str, ...] = ("PAR",)) -> str | N
     return _ISIN_SYMBOLS[isin]
 
 
-def history(market: str, ticker: str, years: int = 1) -> list[tuple[date, float]]:
+def _history_live(market: str, ticker: str, years: int = 1) -> list[tuple[date, float]]:
     """Daily closes, oldest first (about `years` years). Empty if no free source has the stock."""
     if market == "FR":
         symbol = symbol_for_isin(ticker) if len(ticker) == 12 else f"{ticker}.PA"
@@ -112,7 +112,7 @@ def symbol_details(symbol: str) -> dict | None:
             "exchange": meta.get("fullExchangeName") or meta.get("exchangeName") or ""}
 
 
-def symbol_history(symbol: str, years: int = 1) -> list[tuple[date, float]]:
+def _symbol_live(symbol: str, years: int = 1) -> list[tuple[date, float]]:
     """Any Yahoo symbol (benchmarks such as SPY or QQQ)."""
     try:
         data = _yahoo(symbol, years)
@@ -128,7 +128,7 @@ def symbol_history(symbol: str, years: int = 1) -> list[tuple[date, float]]:
         return []
 
 
-def fx_history(currency: str, years: int = 1) -> list[tuple[date, float]]:
+def _fx_live(currency: str, years: int = 1) -> list[tuple[date, float]]:
     """US dollars per one unit of `currency`, daily. [] for USD (rate is 1)."""
     currency = currency.upper()
     if currency == "USD":
@@ -145,6 +145,94 @@ def fx_history(currency: str, years: int = 1) -> list[tuple[date, float]]:
         return _stooq(f"{currency.lower()}usd")[-(260 * years):]
     except Exception:
         return []
+
+
+# ---- stored prices: the background job saves daily closes; pages read them instead of calling Yahoo ----
+CACHE_FRESH_HOURS = 8
+
+
+def _cache_get(key: str, years: int) -> list[tuple[date, float]] | None:
+    try:
+        import json
+        from core.db import as_utc, get_engine, price_cache, utcnow
+        from sqlalchemy import select
+        with get_engine().connect() as conn:
+            row = conn.execute(select(price_cache.c.data, price_cache.c.updated_at).where(price_cache.c.key == key)).first()
+        if not row:
+            return None
+        data = [(date.fromisoformat(d), float(v)) for d, v in json.loads(row[0])]
+        fresh = (utcnow() - as_utc(row[1])).total_seconds() < CACHE_FRESH_HOURS * 3600
+        if fresh and years <= 4:          # stored data is always a full 4-year download (or all there is)
+            cutoff = date.today() - timedelta(days=int(365.25 * years))
+            return [(d, v) for d, v in data if d >= cutoff]
+    except Exception:
+        return None
+    return None
+
+
+def _cache_put(key: str, data: list[tuple[date, float]]) -> None:
+    if len(data) < 5:
+        return
+    try:
+        import json
+        from core.db import get_engine, price_cache, utcnow
+        from sqlalchemy import delete, insert
+        payload = json.dumps([[d.isoformat(), round(v, 6)] for d, v in data])
+        with get_engine().begin() as conn:
+            conn.execute(delete(price_cache).where(price_cache.c.key == key))
+            conn.execute(insert(price_cache).values(key=key[:40], data=payload, updated_at=utcnow()))
+    except Exception:
+        pass
+
+
+def _cached(key: str, years: int, live) -> list[tuple[date, float]]:
+    hit = _cache_get(key, years)
+    if hit is not None:
+        return hit
+    data = live(max(years, 4))          # fetch a full 4 years once, so later requests are all served from storage
+    _cache_put(key, data)
+    cutoff = date.today() - timedelta(days=int(365.25 * years))
+    return [(d, v) for d, v in data if d >= cutoff]
+
+
+def history(market: str, ticker: str, years: int = 1) -> list[tuple[date, float]]:
+    """Daily closes, oldest first (about `years` years). Empty if no free source has the stock."""
+    return _cached(f"{market}:{ticker}", years, lambda y: _history_live(market, ticker, y))
+
+
+def symbol_history(symbol: str, years: int = 1) -> list[tuple[date, float]]:
+    return _cached(f"SYM:{symbol}", years, lambda y: _symbol_live(symbol, y))
+
+
+def fx_history(currency: str, years: int = 1) -> list[tuple[date, float]]:
+    if currency.upper() == "USD":
+        return []
+    return _cached(f"FX:{currency.upper()}", years, lambda y: _fx_live(currency, y))
+
+
+def refresh_cache(limit: int = 120) -> int:
+    """Worker: re-download prices for everything members watch or hold, benchmarks and currencies."""
+    from sqlalchemy import select
+    from core.db import get_engine, transactions, watchlist
+    from services.portfolio import CURRENCY, HOME_CURRENCIES, OTHER
+    with get_engine().connect() as conn:
+        pairs = {tuple(r) for r in conn.execute(select(watchlist.c.market, watchlist.c.ticker).distinct())}
+        pairs |= {tuple(r) for r in conn.execute(select(transactions.c.market, transactions.c.ticker).distinct())}
+    jobs = [(f"SYM:{t}" if m == OTHER else f"{m}:{t}",
+             (lambda t=t: _symbol_live(t, 4)) if m == OTHER else (lambda m=m, t=t: _history_live(m, t, 4))) for m, t in sorted(pairs)]
+    jobs += [(f"SYM:{s}", lambda s=s: _symbol_live(s, 4)) for s in ("SPY", "QQQ")]
+    currencies = ({CURRENCY.get(m, "USD") for m, _ in pairs} | set(HOME_CURRENCIES)) - {"USD"}
+    jobs += [(f"FX:{c}", lambda c=c: _fx_live(c, 4)) for c in sorted(currencies)]
+    done = 0
+    for key, fetch in jobs[:limit]:
+        try:
+            data = fetch()
+        except Exception:
+            continue
+        if data:
+            _cache_put(key, data)
+            done += 1
+    return done
 
 
 def move_on(hist: list[tuple[date, float]], day: date) -> float | None:
@@ -181,14 +269,18 @@ def sparkline_svg(hist: list[tuple[date, float]], days: int = 30, width: int = 9
             f'aria-label="30-day price trend"><polyline fill="none" stroke-width="1.6" points="{xy}"/></svg>')
 
 
-def chart_svg(hist: list[tuple[date, float]], markers: list[date], days: int = 120) -> str:
-    """Responsive price chart with a dot on each filing date."""
+def chart_svg(hist: list[tuple[date, float]], markers: list[date], days: int = 120,
+              levels: list[tuple[float, str, str]] | None = None) -> str:
+    """Responsive price chart with a dot on each filing date, and optional level lines (value, label, kind)."""
     data = hist[-days:]
     if len(data) < 5:
         return ""
     w, h, pad = 720, 180, 8
     closes = [c for _, c in data]
     lo, hi = min(closes), max(closes)
+    levels = [(v, label, kind) for v, label, kind in (levels or []) if v and 0.2 * lo <= v <= 5 * hi]
+    for v, _, _ in levels:                   # make room for your targets on the chart
+        lo, hi = min(lo, v), max(hi, v)
     span = (hi - lo) or 1
     x = lambda i: pad + i * (w - 2 * pad) / (len(data) - 1)
     y = lambda c: h - pad - (c - lo) / span * (h - 2 * pad)
@@ -199,6 +291,10 @@ def chart_svg(hist: list[tuple[date, float]], markers: list[date], days: int = 1
     for i, (d, c) in enumerate(data):
         if d in marked or (i + 1 < len(data) and any(d < m < data[i + 1][0] for m in marked)):
             dots.append(f'<circle cx="{x(i):.1f}" cy="{y(c):.1f}" r="3.5"><title>Filing on {d:%d %b}</title></circle>')
+    lines = "".join(
+        f'<line x1="{pad}" x2="{w - pad}" y1="{y(v):.1f}" y2="{y(v):.1f}" class="lvl {kind}"><title>{label}: {v:,.2f}</title></line>'
+        for v, label, kind in levels)
+    legend = "".join(f'<span class="lvl-key {kind}">{label} {v:,.2f}</span>' for v, label, kind in levels)
     first, last = data[0], data[-1]
     change = last[1] / first[1] - 1 if first[1] else 0
     return (f'<div class="chart"><div class="chart-head"><span>{len(data)} trading days</span>'
@@ -206,5 +302,5 @@ def chart_svg(hist: list[tuple[date, float]], markers: list[date], days: int = 1
             f'<span class="chart-last">Last close {last[1]:,.2f} on {last[0]:%d %b}</span></div>'
             f'<svg viewBox="0 0 {w} {h}" preserveAspectRatio="none" role="img" aria-label="Share price chart">'
             f'<polygon class="area" points="{area}"/><polyline class="line" fill="none" points="{line}"/>'
-            f'<g class="dots">{"".join(dots)}</g></svg>'
-            f'<div class="chart-foot">Dots mark filing dates. Prices from free sources, may be delayed.</div></div>')
+            f'{lines}<g class="dots">{"".join(dots)}</g></svg>'
+            f'<div class="chart-foot">{legend}Dots mark filing dates. Prices from free sources, may be delayed.</div></div>')

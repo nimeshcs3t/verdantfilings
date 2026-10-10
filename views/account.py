@@ -169,9 +169,13 @@ def delivery_settings(user: dict) -> None:
         hour = c2.selectbox("Morning brief time", list(range(4, 12)), index=list(range(4, 12)).index(int(prefs.get("morning_hour") or 7)),
                             format_func=lambda h: f"{h:02d}:00", help="In the timezone set under Alerts.")
         weekly = st.checkbox("Weekly AI briefing on Mondays (uses your digest time)", value=bool(prefs.get("weekly_ai", True)))
-        monthly = st.checkbox("Monthly PDF portfolio report on the 1st", value=bool(prefs.get("monthly_pdf", True)))
+        c3, c4 = st.columns([1.4, 1])
+        monthly = c3.checkbox("Monthly PDF portfolio report on the 1st", value=bool(prefs.get("monthly_pdf", True)))
+        theme = c4.selectbox("Report style", ["light", "dark"], index=1 if prefs.get("report_theme") == "dark" else 0,
+                             format_func=str.title)
         if st.form_submit_button("Save briefings"):
-            settings_svc.save(user["id"], morning_brief=morning, morning_hour=hour, weekly_ai=weekly, monthly_pdf=monthly)
+            settings_svc.save(user["id"], morning_brief=morning, morning_hour=hour, weekly_ai=weekly, monthly_pdf=monthly,
+                              report_theme=theme)
             if weekly:
                 personal.save_prefs(user["id"], weekly=True)
             st.success("Saved.")
@@ -184,8 +188,15 @@ def delivery_settings(user: dict) -> None:
         insider = st.checkbox("Insider buying alerts: 2 or more insiders buying within 30 days, or a single US purchase "
                               "of $1M or more, for companies you follow", value=bool(prefs.get("insider_alerts", True)))
         listing = st.multiselect("New listing alerts for these markets", list(markets), default=chosen)
+        from services.ipos import COUNTRY, SECTORS
+        c1, c2 = st.columns(2)
+        ipo_c = c1.multiselect("New IPO alerts: countries", list(COUNTRY.values()),
+                               default=[c for c in prefs.get("ipo_alert_countries") or [] if c in COUNTRY.values()])
+        ipo_s = c2.multiselect("New IPO alerts: sectors (empty = all)", SECTORS,
+                               default=[s for s in prefs.get("ipo_alert_sectors") or [] if s in SECTORS])
         if st.form_submit_button("Save signals"):
-            settings_svc.save(user["id"], insider_alerts=insider, new_listing_markets=[markets[c] for c in listing])
+            settings_svc.save(user["id"], insider_alerts=insider, new_listing_markets=[markets[c] for c in listing],
+                              ipo_alert_countries=ipo_c, ipo_alert_sectors=ipo_s)
             st.success("Saved.")
 
 

@@ -106,12 +106,19 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def create_session(user_id: int) -> str:
+SESSION_HOURS = 12          # sessions without "keep me signed in" end after 12 hours without activity
+
+
+def create_session(user_id: int, remember: bool = False, device: str | None = None, ip: str | None = None) -> str:
+    """Every sign-in gets a session row, so members can see and end their sessions from any device."""
     token = secrets.token_urlsafe(32)
+    now = utcnow()
+    life = timedelta(days=REMEMBER_DAYS) if remember else timedelta(hours=SESSION_HOURS)
     with get_engine().begin() as conn:
-        conn.execute(delete(sessions).where(sessions.c.expires_at < utcnow()))
-        conn.execute(insert(sessions).values(token_hash=_hash(token), user_id=user_id,
-                                             expires_at=utcnow() + timedelta(days=REMEMBER_DAYS)))
+        conn.execute(delete(sessions).where(sessions.c.expires_at < now))
+        conn.execute(insert(sessions).values(token_hash=_hash(token), user_id=user_id, expires_at=now + life,
+                                             created_at=now, last_seen=now, device=(device or "")[:80] or None,
+                                             ip=(ip or "")[:64] or None, remember=bool(remember)))
     return token
 
 
@@ -125,12 +132,56 @@ def session_user(token: str | None) -> int | None:
     return row["user_id"]
 
 
+def touch_session(token: str | None, ip: str | None = None) -> None:
+    """Note activity (at most every few minutes); short sessions stay alive while in use."""
+    if not token:
+        return
+    now = utcnow()
+    with get_engine().begin() as conn:
+        row = conn.execute(select(sessions.c.remember).where(sessions.c.token_hash == _hash(token))).first()
+        if row is None:
+            return
+        values = {"last_seen": now}
+        if ip:
+            values["ip"] = ip[:64]
+        if not row[0]:
+            values["expires_at"] = now + timedelta(hours=SESSION_HOURS)
+        conn.execute(update(sessions).where(sessions.c.token_hash == _hash(token)).values(**values))
+
+
+def list_sessions(user_id: int, current: str | None = None) -> list[dict]:
+    with get_engine().connect() as conn:
+        rows = [dict(r) for r in conn.execute(select(sessions).where(sessions.c.user_id == user_id, sessions.c.expires_at >= utcnow())
+                                              ).mappings()]
+    me = _hash(current) if current else None
+    for r in rows:
+        r["current"] = r["token_hash"] == me
+        r["id"] = r["token_hash"][:12]
+    return sorted(rows, key=lambda r: (not r["current"], -(as_utc(r.get("last_seen") or r.get("created_at") or r["expires_at"]).timestamp())))
+
+
 def end_session(token: str | None) -> None:
     if isinstance(token, str) and token:
         with get_engine().begin() as conn:
             conn.execute(delete(sessions).where(sessions.c.token_hash == _hash(token)))
 
 
-def end_all_sessions(user_id: int) -> None:
+def end_session_by_id(user_id: int, short_id: str) -> bool:
+    """End one of the member's own sessions, chosen by the short id shown on the Account page."""
+    if not short_id or len(short_id) != 12:
+        return False
     with get_engine().begin() as conn:
-        conn.execute(delete(sessions).where(sessions.c.user_id == user_id))
+        rows = conn.execute(select(sessions.c.token_hash).where(sessions.c.user_id == user_id)).scalars().all()
+        target = next((h for h in rows if h.startswith(short_id)), None)
+        if target:
+            conn.execute(delete(sessions).where(sessions.c.token_hash == target, sessions.c.user_id == user_id))
+    return bool(target)
+
+
+def end_all_sessions(user_id: int, keep: str | None = None) -> int:
+    """End every session of this member, except the one with token `keep` (the device doing it)."""
+    q = delete(sessions).where(sessions.c.user_id == user_id)
+    if keep:
+        q = q.where(sessions.c.token_hash != _hash(keep))
+    with get_engine().begin() as conn:
+        return conn.execute(q).rowcount or 0

@@ -39,8 +39,8 @@ def get(uid: str) -> dict[str, str]:
 
 
 def _llm(prompt: str) -> str | None:
-    from .summarize import _anthropic, _gemini
-    for provider in (_gemini, _anthropic):
+    from .summarize import _anthropic, _gemini, providers
+    for provider in providers():
         try:
             out = provider(prompt)
             if out:

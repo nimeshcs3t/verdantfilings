@@ -354,8 +354,8 @@ def _doc_text(item: dict) -> str:
 
 
 def _ai(prompt: str) -> dict | None:
-    from .summarize import _anthropic, _gemini
-    for provider in (_gemini, _anthropic):
+    from .summarize import _anthropic, _gemini, providers
+    for provider in providers():
         try:
             reply = provider(prompt)
         except Exception:

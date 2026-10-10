@@ -69,8 +69,8 @@ def snapshot(user_id: int) -> dict | None:
 
 
 def _ai(prompt: str) -> str | None:
-    from .summarize import _anthropic, _gemini
-    for provider in (_gemini, _anthropic):
+    from .summarize import providers
+    for provider in providers(private=True):      # mentions the companies a member holds
         try:
             out = provider(prompt)
             if out:

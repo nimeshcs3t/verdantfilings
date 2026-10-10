@@ -1,7 +1,7 @@
 """Answer a question about one filing, using only that filing's text (Gemini or Claude)."""
 from __future__ import annotations
 
-from .summarize import _anthropic, _gemini
+from .summarize import _anthropic, _gemini, providers
 
 PROMPT = """Answer the question using only the stock-exchange filing below. Be brief and specific: quote figures,
 dates and names exactly as the filing gives them. If the filing doesn't say, answer "The filing doesn't say." and
@@ -32,7 +32,7 @@ def answer(question: str, filing: dict) -> str:
     prompt = PROMPT.format(company=filing.get("company_name", ""), title=filing.get("title_en", ""),
                            title_local=filing.get("title_local", ""), summary=filing.get("summary_en") or "",
                            body=(filing.get("body_en") or "")[:12000], question=question)
-    for provider in (_gemini, _anthropic):
+    for provider in providers():
         try:
             result = provider(prompt)
             if result:
@@ -100,7 +100,7 @@ def ask_filings(question: str, rows: list[dict]) -> tuple[str, list[dict]]:
         + (f" | {(r.get('summary_en') or '').replace(chr(10), ' ')[:350]}" if r.get("summary_en") else "")
         for i, r in enumerate(chosen, 1))
     prompt = MANY_PROMPT.format(question=question, items=items)
-    for provider in (_gemini, _anthropic):
+    for provider in providers():
         try:
             result = provider(prompt)
             if result:
@@ -189,7 +189,9 @@ def ask_portfolio(question: str, user_id: int, show_amounts: bool = True) -> tup
     if not ctx:
         return "Add some holdings on the Portfolio page first.", []
     prompt, filings = ctx
-    for provider in (_gemini, _anthropic):
+    if not providers(private=True):
+        return "Portfolio questions are turned off on this site (PRIVATE_AI_PROVIDER is set to none).", filings
+    for provider in providers(private=True):
         try:
             result = provider(prompt.replace("{question}", question))
             if result:

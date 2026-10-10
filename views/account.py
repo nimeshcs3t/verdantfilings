@@ -2,8 +2,7 @@ import secrets
 
 import streamlit as st
 
-from core.auth import change_password, update_user
-from core.session import logout
+from core.auth import update_user
 from core.ui import esc, html_block, page_header
 from services import backup, emailer, personal, settings as settings_svc, telegram
 from sources import configured_sources, visible_sources
@@ -69,31 +68,10 @@ def page() -> None:
     st.caption("Dark mode follows your phone or computer setting. To choose yourself, open the ⋮ menu at the top "
                "right of the app, then Settings, then pick Light or Dark.")
 
-    st.subheader("Change password", divider=False)
-    with st.form("pw", clear_on_submit=True):
-        old = st.text_input("Current password", type="password", autocomplete="current-password")
-        new = st.text_input("New password", type="password", autocomplete="new-password")
-        confirm = st.text_input("Confirm new password", type="password", autocomplete="new-password")
-        if st.form_submit_button("Change password"):
-            if new != confirm:
-                st.error("The new passwords don't match.")
-            else:
-                err = change_password(user["id"], old, new)
-                if err:
-                    st.error(err)
-                else:
-                    personal.end_all_sessions(user["id"])
-                    st.success("Password changed. Other devices have been signed out.")
-
     st.divider()
-    c1, c2, _ = st.columns([1, 1.4, 2])
-    if c1.button("Sign out", width="stretch"):
-        logout()
-        st.rerun()
-    if c2.button("Sign out on all devices", width="stretch"):
-        personal.end_all_sessions(user["id"])
-        logout()
-        st.rerun()
+    st.header("Security", divider=False)
+    from views import security
+    security.section(user)
 
 
 def alert_settings(user: dict) -> None:

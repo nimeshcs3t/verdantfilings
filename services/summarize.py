@@ -64,6 +64,22 @@ def _anthropic(prompt: str) -> str | None:
     return "".join(b.get("text", "") for b in r.json().get("content", [])).strip()
 
 
+def providers(private: bool = False) -> tuple:
+    """AI services to try, in order. AI_PROVIDER picks the first choice ("gemini" or "anthropic"). For prompts that
+    contain a member's own portfolio, PRIVATE_AI_PROVIDER can choose differently ("anthropic", "gemini", or "none" to
+    never send portfolios to AI). Note: Google may use prompts sent with a free-tier Gemini key to improve its products."""
+    from core.config import get_secret
+    choice = str(get_secret("PRIVATE_AI_PROVIDER" if private and get_secret("PRIVATE_AI_PROVIDER") else "AI_PROVIDER",
+                            "gemini")).strip().lower()
+    if choice == "none":
+        return ()
+    if choice in {"anthropic-only", "claude-only"}:
+        return (_anthropic,)
+    if choice in {"gemini-only"}:
+        return (_gemini,)
+    return (_anthropic, _gemini) if choice in {"anthropic", "claude"} else (_gemini, _anthropic)
+
+
 def _extractive(text_en: str) -> str:
     candidates = re.split(r"(?<=[.!?])\s+|\n+", text_en or "")
     scored = []
@@ -89,7 +105,7 @@ def summarize(text_local: str, text_en: str, title_en: str, company: str) -> str
     doc = (text_local or text_en or "")[:15000]
     if doc:
         prompt = PROMPT.format(company=company, title=title_en, doc=doc)
-        for provider in (_gemini, _anthropic):
+        for provider in providers():
             try:
                 result = provider(prompt)
                 if result:

@@ -28,6 +28,12 @@ try:
 except Exception:
     pass
 
+# Password reset links from email work without signing in.
+_reset = st.query_params.get("reset")
+if _reset:
+    signin.reset_page(_reset)
+    st.stop()
+
 # Read-only shared portfolio links work without signing in.
 _share = st.query_params.get("share")
 if _share:
@@ -46,6 +52,16 @@ if user is None:
     st.stop()
 
 st.session_state["user"] = user
+from core.auth import admin_requires_2fa  # noqa: E402
+_needs_2fa = user["role"] == "admin" and admin_requires_2fa() and not user.get("totp_secret")
+_showing_codes = st.session_state.get("2fa-forced") and st.session_state.get("2fa-new-codes")   # finish showing backup codes
+if _needs_2fa or _showing_codes:
+    from views import security  # noqa: E402
+    st.session_state["2fa-forced"] = True
+    st.navigation([st.Page(security.required_page, title="Two-factor sign-in", url_path="secure", default=True)],
+                  position="hidden").run()
+    st.stop()
+st.session_state.pop("2fa-forced", None)
 pages = {
     "today": st.Page(today.page, title="Today", url_path="today", default=True),
     "company": st.Page(company.page, title="Companies", url_path="company"),

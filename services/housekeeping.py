@@ -35,6 +35,10 @@ def cleanup(force: bool = False) -> dict:
         removed["past events"] = conn.execute(delete(events).where(events.c.event_date < date.today() - timedelta(days=30))).rowcount
         removed["run log"] = conn.execute(delete(run_log).where(run_log.c.started_at < now - timedelta(days=30))).rowcount
         removed["expired sign-ins"] = conn.execute(delete(sessions).where(sessions.c.expires_at < now)).rowcount
+        from core.db import password_resets, security_events, share_links
+        removed["old security log"] = conn.execute(delete(security_events).where(security_events.c.ts < now - timedelta(days=365))).rowcount
+        removed["used reset links"] = conn.execute(delete(password_resets).where(password_resets.c.expires_at < now - timedelta(days=1))).rowcount
+        removed["expired share links"] = conn.execute(delete(share_links).where(share_links.c.expires_at < now)).rowcount
         removed["old sign-in attempts"] = conn.execute(delete(login_attempts).where(login_attempts.c.ts < now - timedelta(days=1))).rowcount
         removed["old usage counters"] = conn.execute(delete(api_usage).where(
             api_usage.c.day < (date.today() - timedelta(days=90)).isoformat())).rowcount

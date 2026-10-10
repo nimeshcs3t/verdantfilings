@@ -27,7 +27,8 @@ def page() -> None:
                   for name, t in [("Members", users), ("Companies tracked", companies),
                                   ("Filings stored", filings), ("Messages", messages)]}
         rows = conn.execute(select(users.c.id, users.c.username, users.c.email, users.c.role, users.c.plan,
-                                   users.c.is_active, users.c.telegram_chat_id, users.c.created_at)
+                                   users.c.is_active, users.c.telegram_chat_id, (users.c.totp_secret.isnot(None)).label("two_factor"),
+                                   users.c.created_at)
                             .order_by(users.c.id)).mappings().all()
         wl_counts = dict(conn.execute(select(watchlist.c.user_id, func.count()).group_by(watchlist.c.user_id)).all())
     for col, (label, value) in zip(st.columns(4), counts.items()):
@@ -38,10 +39,11 @@ def page() -> None:
                         "companies": wl_counts.get(r["id"], 0)} for r in rows]).drop(columns=["telegram_chat_id"])
     edited = st.data_editor(
         df, hide_index=True, width="stretch", key="users-editor",
-        disabled=["id", "username", "email", "created_at", "telegram", "companies"],
+        disabled=["id", "username", "email", "created_at", "telegram", "companies", "two_factor"],
         column_config={"role": st.column_config.SelectboxColumn(options=["user", "admin"], required=True),
                        "plan": st.column_config.SelectboxColumn(options=["free", "pro"], required=True),
-                       "is_active": st.column_config.CheckboxColumn("active")})
+                       "is_active": st.column_config.CheckboxColumn("active"),
+                       "two_factor": st.column_config.CheckboxColumn("2FA")})
     if st.button("Save member changes", type="primary"):
         changed = 0
         for before, after in zip(df.to_dict("records"), edited.to_dict("records")):
@@ -51,6 +53,12 @@ def page() -> None:
                     st.warning("You can't remove your own admin access.")
                     continue
                 update_user(int(after["id"]), **{k: (bool(v) if k == "is_active" else v) for k, v in diff.items()})
+                from core.security import record
+                record("admin_change", int(after["id"]), after["username"],
+                       f"by {me['username']}: " + ", ".join(f"{k} {before[k]} → {v}" for k, v in diff.items()))
+                if diff.get("is_active") is False:
+                    from services.personal import end_all_sessions
+                    end_all_sessions(int(after["id"]))
                 changed += 1
         st.success(f"Saved {changed} change{'s' if changed != 1 else ''}.")
 
@@ -63,6 +71,9 @@ def page() -> None:
         if st.form_submit_button("Add member"):
             _, err = create_user(username, password, plan=plan)
             st.error(err) if err else st.success(f"Added {username.lower()}.")
+
+    member_tools(me, rows)
+    security_panel()
 
     st.subheader("Sync", divider=False)
     st.caption("The GitHub job checks every company every 10 minutes during Korean market hours and hourly "
@@ -176,3 +187,69 @@ def sources_panel() -> None:
     ipo_rows = status.ipo_sources()
     st.caption("IPO sources: " + "  ·  ".join(
         f"{STATE[r['state']][0]} {r['country']} ({r['count']}, {relative_time(r['last_ok']) if r['last_ok'] else 'not yet'})" for r in ipo_rows))
+
+
+def member_tools(me: dict, rows) -> None:
+    """Help a member who is locked out: temporary password, two-factor reset, sign out everywhere."""
+    from core.auth import disable_second_factor, hash_password, password_problem
+    from core.security import record
+    from services.personal import end_all_sessions
+    st.subheader("Help a member", divider=False)
+    others = {r["username"]: r["id"] for r in rows}
+    c1, c2 = st.columns([1, 2])
+    who = c1.selectbox("Member", list(others), key="help-who")
+    uid = others[who]
+    with c2:
+        t1, t2, t3 = st.tabs(["Temporary password", "Reset two-factor", "Sign out everywhere"])
+        with t1:
+            with st.form("help-pw", border=False, clear_on_submit=True):
+                pw = st.text_input("New temporary password", type="password", autocomplete="new-password")
+                if st.form_submit_button("Set password"):
+                    err = password_problem(pw)
+                    if err:
+                        st.error(err)
+                    else:
+                        from sqlalchemy import update as _update
+                        with get_engine().begin() as conn:
+                            conn.execute(_update(users).where(users.c.id == uid).values(pw_hash=hash_password(pw)))
+                        end_all_sessions(uid)
+                        record("admin_change", uid, who, f"by {me['username']}: temporary password set")
+                        st.success(f"Password set for {who}, and all their devices signed out. Ask them to change it.")
+        with t2:
+            st.caption("For a member who lost their phone and backup codes. Confirm who they are first.")
+            if st.button("Turn off their two-factor sign-in", key="help-2fa"):
+                disable_second_factor(uid, None, by_admin=me)
+                end_all_sessions(uid)
+                st.success(f"Two-factor sign-in turned off for {who}.")
+        with t3:
+            if st.button("Sign them out on all devices", key="help-out"):
+                n = end_all_sessions(uid)
+                record("admin_change", uid, who, f"by {me['username']}: signed out of {n} sessions")
+                st.success(f"Ended {n} session{'s' if n != 1 else ''}.")
+
+
+def security_panel() -> None:
+    from core.db import as_utc
+    from core.security import LABELS, events, failed_by_username
+    st.subheader("Security", divider=False)
+    failed = failed_by_username(24)
+    recent = events(limit=60)
+    alerts = events(kinds=["login_locked", "new_device", "admin_2fa_reset", "2fa_off", "password_reset", "account_deleted"],
+                    since_hours=72, limit=20)
+    total_failed = sum(n for _, n in failed)
+    stats = [("Failed sign-ins, 24 h", total_failed), ("Accounts targeted, 24 h", len(failed)),
+             ("Notable events, 3 days", len(alerts))]
+    html_block('<div class="stat-grid">' + "".join(f'<div class="stat"><div class="k">{k}</div><div class="v">{v}</div></div>'
+                                                   for k, v in stats) + "</div>")
+    if total_failed >= 20:
+        st.warning("Many failed sign-ins in the last day. Someone may be guessing passwords; accounts lock for 15 "
+                   "minutes after 5 wrong tries. Consider SIGNUP_MODE=invite and asking members to turn on two-factor.")
+    if failed:
+        st.caption("Failed sign-ins by username (24 h): " + ", ".join(f"{esc(u or '?')} {n}" for u, n in failed[:10]))
+    with st.expander(f"Security log (latest {len(recent)})"):
+        html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>When (UTC)</th><th>Member</th><th>What</th>'
+                   '<th>Device</th><th>IP</th></tr>' + "".join(
+                       f'<tr><td>{as_utc(r["ts"]):%d %b %H:%M}</td><td>{esc(r.get("username") or "")}</td>'
+                       f'<td>{esc(LABELS.get(r["kind"], r["kind"]))}{(" · " + esc(r["detail"])) if r.get("detail") else ""}</td>'
+                       f'<td>{esc(r.get("device") or "")}</td><td>{esc(r.get("ip") or "")}</td></tr>' for r in recent)
+                   + "</table></div>")

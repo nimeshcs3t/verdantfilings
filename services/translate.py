@@ -138,12 +138,12 @@ def _google(text: str, src: str) -> str | None:
 
 def _llm(text: str, src: str) -> str | None:
     """Gemini (free tier) or Claude, if a key is set. Keeps one output line per input line."""
-    from .summarize import _anthropic, _gemini
+    from .summarize import _anthropic, _gemini, providers
     language = LANG_NAMES.get(src, "the original language")
     prompt = (f"Translate this {language} text from a company's stock-exchange filing into clear English. "
               "Keep the line breaks: return exactly one line of English for each line of input, in the same "
               "order. Return only the translation, with no notes.\n\n" + text)
-    for provider in (_gemini, _anthropic):
+    for provider in providers():
         try:
             result = provider(prompt)
             if result:
@@ -314,11 +314,11 @@ def translate_keyword(word: str, lang: str) -> str | None:
             if "toomanyrequests" in type(exc).__name__.lower() or "too many requests" in str(exc).lower():
                 _google_paused_until = time.time() + 1800
     if not out:
-        from .summarize import _anthropic, _gemini
+        from .summarize import _anthropic, _gemini, providers
         language = LANG_NAMES.get(lang, lang)
         prompt = (f"Give the {language} word or short phrase that companies use in stock-exchange filing titles for "
                   f"this English term: \"{word}\". Reply with only the {language} term.")
-        for provider in (_gemini, _anthropic):
+        for provider in providers():
             try:
                 out = provider(prompt)
                 if out:

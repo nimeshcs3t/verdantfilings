@@ -11,3 +11,4 @@ psycopg[binary]>=3.1
 pypdf>=4.0
 streamlit-js-eval>=0.1.7
 fpdf2>=2.7
+segno>=1.6

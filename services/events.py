@@ -57,10 +57,10 @@ def _regex_dates(text: str) -> list[tuple[date, str]]:
 
 
 def _llm_dates(row: dict) -> list[tuple[date, str]] | None:
-    from .summarize import _anthropic, _gemini
+    from .summarize import _anthropic, _gemini, providers
     text = "\n".join(x for x in (row.get("summary_en"), (row.get("body_en") or "")[:8000]) if x)
     prompt = PROMPT.format(title=row["title_en"], filed=row["filed_date"], text=text)
-    for provider in (_gemini, _anthropic):
+    for provider in providers():
         try:
             reply = provider(prompt)
         except Exception:

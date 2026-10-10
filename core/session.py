@@ -18,10 +18,26 @@ def login(user: dict) -> None:
 
 def remember(user_id: int) -> None:
     """Keep this browser signed in for 30 days (call right after login)."""
+    start(get_user(user_id) or {"id": user_id}, keep=True)
+
+
+def start(user: dict, keep: bool = False) -> str:
+    """Finish signing in: session state, a session row (listed on the Account page), the remember-me token when asked
+    for, a security log entry and a new-device alert."""
     from services.personal import create_session
-    token = create_session(user_id)
+    from .security import check_new_device, client, record
+    login(user)
+    ip, device = client()
+    token = create_session(user["id"], remember=keep, device=device, ip=ip)
     st.session_state["cookie_token"] = token
-    st.session_state["set_cookie"] = token
+    st.session_state["remembered"] = keep
+    st.session_state["touched"] = time.time()
+    if keep:
+        st.session_state["set_cookie"] = token
+    if user.get("username"):
+        record("login", user["id"], user["username"], "kept signed in for 30 days" if keep else "", ip, device)
+        check_new_device(user, ip, device)
+    return token
 
 
 def _valid(token) -> str | None:
@@ -93,10 +109,23 @@ def current_user() -> dict | None:
             if user and user["is_active"]:
                 login(user)
                 st.session_state["cookie_token"] = token
+                st.session_state["remembered"] = True
                 uid = user["id"]
     if not uid:
         return None
-    if time.time() - st.session_state.get("seen", 0) > IDLE_SECONDS and not st.session_state.get("cookie_token"):
+    token = st.session_state.get("cookie_token")
+    if token:
+        # The session can be ended from another device (Account page) or by a password change: check it each run.
+        from services.personal import session_user, touch_session
+        if session_user(token) != uid:
+            logout()
+            st.session_state["signed_out_elsewhere"] = True
+            return None
+        if time.time() - st.session_state.get("touched", 0) > 300:
+            from .security import client
+            touch_session(token, client()[0])
+            st.session_state["touched"] = time.time()
+    elif time.time() - st.session_state.get("seen", 0) > IDLE_SECONDS:
         logout()
         return None
     user = get_user(uid)

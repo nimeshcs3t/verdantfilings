@@ -36,6 +36,9 @@ users = Table(
     Column("tg_link_code", String(32)),
     Column("is_active", Boolean, nullable=False, default=True),
     Column("created_at", DateTime(timezone=True), default=utcnow),
+    Column("totp_secret", String(64)),                  # two-factor sign-in (authenticator app), base32
+    Column("totp_last_step", Integer),                  # last accepted code window, so a code can't be reused
+    Column("backup_codes", Text),                       # JSON list of sha256 hashes of unused backup codes
 )
 
 watchlist = Table(
@@ -190,6 +193,33 @@ sessions = Table(
     Column("token_hash", String(64), primary_key=True),
     Column("user_id", Integer, nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True)),
+    Column("last_seen", DateTime(timezone=True)),
+    Column("device", String(80)),
+    Column("ip", String(64)),
+    Column("remember", Boolean),
+)
+
+password_resets = Table(
+    "password_resets", metadata,            # one-time reset links, stored hashed
+    Column("token_hash", String(64), primary_key=True),
+    Column("user_id", Integer, nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("used_at", DateTime(timezone=True)),
+)
+
+security_events = Table(
+    "security_events", metadata,            # sign-ins, password and 2FA changes, admin actions
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer),
+    Column("username", String(64)),
+    Column("kind", String(32), nullable=False),
+    Column("detail", String(300)),
+    Column("ip", String(64)),
+    Column("device", String(80)),
+    Column("ts", DateTime(timezone=True), default=utcnow),
+    Index("ix_security_events_user", "user_id", "ts"),
+    Index("ix_security_events_ts", "ts"),
 )
 
 financials = Table(
@@ -401,6 +431,7 @@ share_links = Table(
     Column("token", String(64), primary_key=True),
     Column("user_id", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True), default=utcnow),
+    Column("expires_at", DateTime(timezone=True)),      # empty = never
 )
 
 filing_notes = Table(
@@ -496,22 +527,36 @@ shared_list_items = Table(
 )
 
 # Columns added after a table first existed: (table, column, SQL type). Added on start-up if missing.
-UPGRADES = [("journal", "target_price", "FLOAT"), ("company_meta", "shares", "FLOAT")]
+UPGRADES = [("journal", "target_price", "FLOAT"), ("company_meta", "shares", "FLOAT"),
+            ("users", "totp_secret", "VARCHAR(64)"), ("users", "totp_last_step", "INTEGER"), ("users", "backup_codes", "TEXT"),
+            ("sessions", "created_at", "TIMESTAMP WITH TIME ZONE"), ("sessions", "last_seen", "TIMESTAMP WITH TIME ZONE"), ("sessions", "device", "VARCHAR(80)"),
+            ("sessions", "ip", "VARCHAR(64)"), ("sessions", "remember", "BOOLEAN"), ("share_links", "expires_at", "TIMESTAMP WITH TIME ZONE")]
 
 _engine: Engine | None = None
 _lock = threading.Lock()
 
 
 def _upgrade(engine: Engine) -> None:
+    """Add columns introduced after a table was first created. Each step waits at most 5 s for a busy table."""
+    import logging
     from sqlalchemy import inspect, text
+    pg = engine.dialect.name == "postgresql"
     try:
-        inspector = inspect(engine)
-        for table, column, sql_type in UPGRADES:
-            if column not in {c["name"] for c in inspector.get_columns(table)}:
-                with engine.begin() as conn:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
+        inspector, known = inspect(engine), {}
     except Exception:
-        pass
+        return
+    for table, column, sql_type in UPGRADES:
+        try:
+            if table not in known:
+                known[table] = {c["name"] for c in inspector.get_columns(table)}
+            if column in known[table]:
+                continue
+            with engine.begin() as conn:
+                if pg:
+                    conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {'IF NOT EXISTS ' if pg else ''}{column} {sql_type}"))
+        except Exception as exc:
+            logging.getLogger(__name__).warning("could not add %s.%s: %s", table, column, exc)
 
 
 def get_engine() -> Engine:

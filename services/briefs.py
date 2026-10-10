@@ -25,7 +25,7 @@ Recent filings, newest first:
 def refresh(limit: int = 3) -> int:
     if not (get_secret("GEMINI_API_KEY") or get_secret("ANTHROPIC_API_KEY")):
         return 0
-    from .summarize import _anthropic, _gemini
+    from .summarize import _anthropic, _gemini, providers
     with get_engine().connect() as conn:
         rows = conn.execute(select(companies.c.market, companies.c.ticker, companies.c.name_en, company_meta.c.brief_updated)
                             .select_from(companies.join(watchlist, and_(watchlist.c.market == companies.c.market,
@@ -46,7 +46,7 @@ def refresh(limit: int = 3) -> int:
             continue
         text = "\n".join(f"- {d}: {t}" + (f" | {(s or '').replace(chr(10), ' ')[:400]}" if s else "") for d, t, s in items)
         brief = None
-        for provider in (_gemini, _anthropic):
+        for provider in providers():
             try:
                 brief = provider(PROMPT.format(company=name, items=text))
                 if brief:

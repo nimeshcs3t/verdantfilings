@@ -215,6 +215,7 @@ def css() -> str:
 .lvl-key.target {{ color:var(--up); }} .lvl-key.fair {{ color:var(--amber); }}
 .qv {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(118px, 1fr)); gap:8px; margin:4px 0 12px; }}
 .qv .stat .v {{ font-size:1.02rem; }}
+.qr svg {{ width:190px; height:auto; border-radius:8px; display:block; }}
 .empty {{ border:1px dashed var(--rule); padding:18px 20px; color:var(--muted); margin:8px 0 16px; border-radius:6px; }}
 .brand {{ font-size:2.2rem; font-weight:700; letter-spacing:-0.02em; color:var(--ink); margin:3rem 0 .3rem; }}
 .st-key-bottomnav {{ display:none !important; }}

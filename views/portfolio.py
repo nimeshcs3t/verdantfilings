@@ -756,21 +756,28 @@ def report_tab(user: dict, model: dict | None) -> None:
     st.markdown("**Read-only share link**")
     st.caption("Anyone with the link sees your returns in %, allocation and holdings by weight. Never amounts, share "
                "counts or prices paid. Remove the link any time.")
-    token = share_svc.get_token(user["id"])
+    link = share_svc.info(user["id"])
     from core.config import get_secret
     app_url = (get_secret("APP_URL") or "").rstrip("/")
-    c1, c2 = st.columns([1, 1])
-    if token:
-        st.code(f"{app_url}/?share={token}" if app_url else f"?share={token}", language=None)
-        if c1.button("New link (old one stops working)"):
-            share_svc.create(user["id"])
+    if link:
+        st.code(f"{app_url}/?share={link['token']}" if app_url else f"?share={link['token']}", language=None)
+        st.caption(f"Created {link['created_at']:%d %b %Y}. "
+                   + (f"Stops working on {link['expires_at']:%d %b %Y}." if link.get("expires_at") else "Never expires.")
+                   + " Only one link exists at a time.")
+        c1, c2, c3 = st.columns([1, 1.2, 1], vertical_alignment="bottom")
+        days = c1.selectbox("New link lasts", list(share_svc.EXPIRY_CHOICES), index=1, key="share-days")
+        if c2.button("Make a new link (old one stops)", width="stretch"):
+            share_svc.create(user["id"], share_svc.EXPIRY_CHOICES[days])
             st.rerun()
-        if c2.button("Remove link"):
+        if c3.button("Remove link", width="stretch"):
             share_svc.revoke(user["id"])
             st.rerun()
-    elif c1.button("Create share link", type="primary"):
-        share_svc.create(user["id"])
-        st.rerun()
+    else:
+        c1, c2 = st.columns([1, 1], vertical_alignment="bottom")
+        days = c1.selectbox("Link lasts", list(share_svc.EXPIRY_CHOICES), index=1, key="share-days")
+        if c2.button("Create share link", type="primary", width="stretch"):
+            share_svc.create(user["id"], share_svc.EXPIRY_CHOICES[days])
+            st.rerun()
 
 
 def share_page(user_id: int) -> None:

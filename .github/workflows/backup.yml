@@ -1,0 +1,46 @@
+name: Database backup
+
+# Nightly encrypted copy of the app's tables (schema "public"), kept 30 days as a workflow artifact.
+# Needs the secret BACKUP_PASSPHRASE. Uses BACKUP_DATABASE_URL if set, otherwise DATABASE_URL.
+#
+# Restore (on a computer with gpg and PostgreSQL 17 tools):
+#   gpg -d verdant-YYYY-MM-DD.dump.gpg > verdant.dump
+#   pg_restore --no-owner --no-privileges --clean --if-exists -d "<database url>" verdant.dump
+
+on:
+  schedule:
+    - cron: "43 4 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Dump and encrypt
+        env:
+          DB_URL: ${{ secrets.BACKUP_DATABASE_URL || secrets.DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKUP_PASSPHRASE}" ]; then echo "::error::Add a BACKUP_PASSPHRASE secret first."; exit 1; fi
+          if [ -z "${DB_URL}" ]; then echo "::error::DATABASE_URL secret is missing."; exit 1; fi
+          export PGURL="$(printf '%s' "$DB_URL" | sed -E 's#^postgres(ql)?(\+[a-z0-9]+)?://#postgresql://#')"
+          docker run --rm -e PGURL postgres:17 sh -c 'pg_dump "$PGURL" --schema=public --no-owner --no-privileges -Fc' > verdant.dump
+          size=$(stat -c %s verdant.dump)
+          if [ "$size" -lt 1000 ]; then echo "::error::Backup looks empty ($size bytes)."; exit 1; fi
+          name="verdant-$(date -u +%F).dump.gpg"
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" --symmetric --cipher-algo AES256 \
+              -o "$name" verdant.dump
+          shred -u verdant.dump
+          echo "BACKUP_FILE=$name" >> "$GITHUB_ENV"
+          echo "Backup: $name, $(stat -c %s "$name") bytes (encrypted)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BACKUP_FILE }}
+          path: ${{ env.BACKUP_FILE }}
+          retention-days: 30
+          if-no-files-found: error

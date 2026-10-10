@@ -49,3 +49,5 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           APP_URL: ${{ secrets.APP_URL }}
+          AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
+          PRIVATE_AI_PROVIDER: ${{ secrets.PRIVATE_AI_PROVIDER }}

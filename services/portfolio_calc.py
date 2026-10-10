@@ -7,7 +7,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from datetime import date, timedelta
 
-PERIODS = [("Today", None), ("1M", 30), ("3M", 91), ("6M", 182), ("YTD", "ytd"), ("1Y", 365), ("2Y", 730),
+PERIODS = [("1D", None), ("1W", 7), ("1M", 30), ("3M", 91), ("6M", 182), ("YTD", "ytd"), ("1Y", 365), ("2Y", 730),
            ("3Y", 1095), ("All", "all")]
 
 

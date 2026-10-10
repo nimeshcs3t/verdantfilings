@@ -16,7 +16,7 @@ from .portfolio_charts import donut_svg, performance_svg
 
 YEARS = 4
 BENCHMARKS = {"S&P 500 (SPY)": "SPY", "Nasdaq 100 (QQQ)": "QQQ", "No benchmark": None}
-CHART_PERIODS = ["1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "All"]
+CHART_PERIODS = ["1W", "1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "All"]
 
 
 OTHER_LABEL = "Other (any Yahoo Finance symbol)"
@@ -171,6 +171,7 @@ def quick_summary(uid: int, base: str, signature: str) -> dict | None:
         return None
     return {"value": model["total"], "today": model["today_change"],
             "today_pct": model["money_returns"][0]["portfolio"] if model["money_returns"] else None,
+            "week_pct": model["money_returns"][1]["portfolio"] if len(model["money_returns"]) > 1 else None,
             "gain": model["total"] - model["cost"] + model["realized"], "cost": model["cost"]}
 
 
@@ -181,13 +182,11 @@ def page() -> None:
     txs = portfolio.list_transactions(uid)
     home = portfolio.home_currency(uid)
 
-    if "pf-hide" not in st.session_state:
-        st.session_state["pf-hide"] = portfolio.hide_amounts(uid)
+    st.session_state["pf-hide"] = portfolio.hide_amounts(uid)
     c1, c2, c3, c4 = st.columns([1.2, 1, 1.3, 0.9], vertical_alignment="bottom")
     mode = c1.segmented_control("Show values in", ["USD", "Home currency"], default="USD", key="pf-mode") or "USD"
-    hide = c4.toggle("Hide amounts", key="pf-hide", help="Hides money values and share counts; percentages stay visible.")
-    if hide != portfolio.hide_amounts(uid):
-        portfolio.set_hide_amounts(uid, hide)
+    c4.toggle("Hide amounts", key="pf-hide", help="Hides money values and share counts; percentages stay visible.",
+              on_change=lambda: portfolio.set_hide_amounts(uid, st.session_state["pf-hide"]))
     chosen = c2.selectbox("Home currency", portfolio.HOME_CURRENCIES,
                           index=portfolio.HOME_CURRENCIES.index(home) if home in portfolio.HOME_CURRENCIES else 0)
     if chosen != home:
@@ -244,7 +243,7 @@ def overview(model: dict, base: str, bench_symbol: str | None) -> None:
                                   label_visibility="collapsed") or "1Y"
     index, daily = model["index"], model["daily"]
     end = index[-1][0]
-    start = {"1M": end - timedelta(days=30), "3M": end - timedelta(days=91), "6M": end - timedelta(days=182),
+    start = {"1W": end - timedelta(days=7), "1M": end - timedelta(days=30), "3M": end - timedelta(days=91), "6M": end - timedelta(days=182),
              "YTD": date(end.year, 1, 1), "1Y": end - timedelta(days=365), "2Y": end - timedelta(days=730),
              "3Y": end - timedelta(days=1095), "All": index[0][0]}[period]
     if method == "On your money":
@@ -765,7 +764,7 @@ def share_page(user_id: int) -> None:
         return
     tiles = "".join(f'<div class="ret"><div class="lbl">{r["label"]}</div><div class="p {_cls(r["portfolio"])}">{_pct(r["portfolio"])}</div>'
                     f'<div class="b">SPY <span class="{_cls(r["benchmark"])}">{_pct(r["benchmark"])}</span></div></div>'
-                    for r in model["money_returns"] if r["label"] != "Today")
+                    for r in model["money_returns"] if r["label"] != "1D")
     html_block('<div class="ret-grid">' + tiles + "</div>")
     rows = model["rows"]
     html_block('<div class="alloc-grid">' + donut_svg("By company", allocation(rows, "name"))

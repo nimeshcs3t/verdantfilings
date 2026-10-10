@@ -78,14 +78,14 @@ def page() -> None:
             from services.importance import score as importance_score
             rows.sort(key=lambda r: (-importance_score(r), r["filed_date"]), reverse=False)
         present = [k for k in ORDER if any(r["category"] == k for r in rows)]
-        if rows:
-            counts = {k: sum(r["category"] == k for r in rows) for k in present}
-            html_block('<div class="brief">' + "".join(
-                chip_html(k).replace("</span>", f" {counts[k]}</span>") for k in present) + "</div>")
-        picked = st.pills("Categories", [label(k) for k in present], selection_mode="multi", key="today-cats",
-                          label_visibility="collapsed") if len(present) > 1 else []
-        if picked:
-            rows = [r for r in rows if label(r["category"]) in picked]
+        counts = {k: sum(r["category"] == k for r in rows) for k in present}
+        if present:
+            st.caption("Tap categories to filter (tap again to clear).")
+            html_block(category_css(present))
+            picked = st.pills("Categories", present, selection_mode="multi", key="today-cats",
+                              format_func=lambda k: f"{label(k)} {counts.get(k, 0)}", label_visibility="collapsed") or []
+            if picked:
+                rows = [r for r in rows if r["category"] in picked]
 
         if errors:
             st.caption("Couldn't reach the regulator for: " + ", ".join(errors) + ". Showing saved filings.")
@@ -129,9 +129,14 @@ def page() -> None:
                 f'<div class="ev-row"><b>{e["event_date"]:%d %b}</b>{esc(e["label"])} <span>{esc(e["company_name"])}</span></div>'
                 for e in coming[:8]))
         html_block('<div class="section" style="margin-top:.2rem">Headlines</div>')
+        names = {"All companies": None, **{f'{w["name_en"]} ({w["ticker"]})': w for w in all_wl}}
+        pick = names[st.selectbox("Headlines for", list(names), key="today-news-co", label_visibility="collapsed")]
         items = []
-        for w in all_wl[:6]:
-            items += cached_english_news(w["name_en"], w["ticker"], 3)[:2]
+        if pick:
+            items = cached_english_news(pick["name_en"], pick["ticker"], 15)
+        else:
+            for w in all_wl[:6]:
+                items += cached_english_news(w["name_en"], w["ticker"], 3)[:2]
         items.sort(key=lambda n: n["published"].timestamp() if n.get("published") else 0, reverse=True)
         render_news(items[:10])
 
@@ -142,6 +147,10 @@ def dashboard(user: dict, wl: list[dict]) -> None:
     tiles = []
     txs = portfolio_svc.list_transactions(user["id"])
     if txs:
+        uid = user["id"]
+        st.session_state["pf-hide"] = portfolio_svc.hide_amounts(uid)
+        st.toggle("Hide amounts", key="pf-hide", help="Hides portfolio amounts here and on the Portfolio page.",
+                  on_change=lambda: portfolio_svc.set_hide_amounts(uid, st.session_state["pf-hide"]))
         base = portfolio_svc.home_currency(user["id"]) if st.session_state.get("pf-mode") == "Home currency" else "USD"
         signature = f"{len(txs)}:{max(t['id'] for t in txs)}:{max(str(t['tx_date']) for t in txs)}"
         s = quick_summary(user["id"], base, signature)
@@ -151,7 +160,9 @@ def dashboard(user: dict, wl: list[dict]) -> None:
             pct = s["today_pct"]
             move = "" if pct is None else f'<span class="mv {"up" if pct > 0 else "down" if pct < 0 else "flat"}">{pct * 100:+.2f}%</span>'
             amount = "" if hidden or s["today"] is None else f" ({s['today']:+,.0f})"
-            tiles.append(("Portfolio", value, f"Today {move}{esc(amount)}"))
+            week = s.get("week_pct")
+            wk = "" if week is None else f' · 1W <span class="mv {"up" if week > 0 else "down" if week < 0 else "flat"}">{week * 100:+.2f}%</span>'
+            tiles.append(("Portfolio", value, f"1D {move}{esc(amount)}{wk}"))
     todays = []
     for m in {w["market"] for w in wl}:
         todays += filings_for([(w["market"], w["ticker"]) for w in wl if w["market"] == m], get_source(m).today())
@@ -165,3 +176,19 @@ def dashboard(user: dict, wl: list[dict]) -> None:
     html_block('<div class="dash">' + "".join(
         f'<div class="stat"><div class="k">{k}</div><div class="v">{esc(v)}</div><div class="sub">{sub}</div></div>'
         for k, v, sub in tiles) + "</div>")
+
+
+def category_css(keys: list[str]) -> str:
+    """Colour each category pill like its tag (pill order follows `keys`)."""
+    from core.ui import CHIP, is_dark
+    dark = is_dark()
+    rules = []
+    for i, k in enumerate(keys, 1):
+        c = CHIP.get(k, CHIP["other"])
+        bg, fg = (c[2], c[3]) if dark else (c[0], c[1])
+        sel = f".st-key-today-cats button:nth-of-type({i})"
+        rules.append(f"{sel}{{background:{bg} !important;color:{fg} !important;border:1px solid transparent !important;}}"
+                     f"{sel}[kind$='Active'],{sel}[aria-pressed='true'],{sel}[aria-checked='true']"
+                     f"{{border:2px solid {fg} !important;font-weight:700 !important;}}"
+                     f"{sel} p{{color:{fg} !important;}}")
+    return "<style>" + "".join(rules) + "</style>"

@@ -423,6 +423,36 @@ new_listings = Table(
     Column("seen_on", Date),
 )
 
+ipos = Table(
+    "ipos", metadata,                       # IPOs from several markets (Nasdaq/SEC, DART, JPX, HKEX, ASX)
+    Column("uid", String(80), primary_key=True),
+    Column("market", String(8), nullable=False),
+    Column("country", String(40)),
+    Column("exchange", String(80)),
+    Column("name", String(200), nullable=False),
+    Column("name_local", String(200)),
+    Column("ticker", String(20)),
+    Column("status", String(12)),            # filed | upcoming | priced | listed
+    Column("listing_date", Date),
+    Column("close_date", Date),               # subscription / offer close
+    Column("price_low", Float),
+    Column("price_high", Float),
+    Column("currency", String(8)),
+    Column("shares_offered", Float),
+    Column("raise_amount", Float),
+    Column("market_cap", Float),
+    Column("sector", String(60)),
+    Column("overview", Text),
+    Column("doc_url", Text),                  # official prospectus / listing document
+    Column("doc_label", String(60)),
+    Column("website", Text),
+    Column("first_day", Float),               # first-day move vs offer price, once listed
+    Column("ai_done", Boolean, nullable=False, default=False),
+    Column("first_seen", Date),
+    Column("updated_at", DateTime(timezone=True), default=utcnow),
+    Index("ix_ipos_date", "listing_date"),
+)
+
 _engine: Engine | None = None
 _lock = threading.Lock()
 

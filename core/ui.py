@@ -201,6 +201,14 @@ def css() -> str:
 .cal-agenda {{ display:block; }}
 .dash {{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin:2px 0 14px; }}
 .dash .stat .sub {{ color:var(--muted); font-size:.78rem; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+.ipo {{ border-top:1px solid var(--rule); padding:14px 0 10px; }}
+.ipo .fl-co {{ font-size:1rem; }}
+.ipo-facts {{ display:flex; flex-wrap:wrap; gap:6px 18px; margin:6px 0 4px; font-size:.86rem; color:var(--ink); }}
+.ipo-facts b {{ color:var(--muted); font-weight:500; margin-right:4px; }}
+.ipo-ov {{ font-size:.9rem; line-height:1.5; color:var(--body-en); margin:4px 0; }}
+.ipo-meta {{ font-size:.82rem; color:var(--muted); }}
+.ipo-meta a {{ color:var(--pine); text-decoration:none; font-weight:500; }}
+.ipo .mv {{ margin-left:8px; }}
 .empty {{ border:1px dashed var(--rule); padding:18px 20px; color:var(--muted); margin:8px 0 16px; border-radius:6px; }}
 .brand {{ font-size:2.2rem; font-weight:700; letter-spacing:-0.02em; color:var(--ink); margin:3rem 0 .3rem; }}
 .st-key-bottomnav {{ display:none !important; }}

@@ -19,8 +19,10 @@ from core.db import get_engine, ipo_stars, ipos, utcnow
 from sources.webhttp import PoliteClient
 
 log = logging.getLogger(__name__)
-COUNTRY = {"US": "USA", "KR": "South Korea", "JP": "Japan", "HK": "Hong Kong", "AU": "Australia"}
-CURRENCY = {"US": "USD", "KR": "KRW", "JP": "JPY", "HK": "HKD", "AU": "AUD"}
+from .ipo_web import MARKETS as _MARKETS  # noqa: E402
+
+COUNTRY = {m: c for m, (c, _) in _MARKETS.items()}
+CURRENCY = {m: cur for m, (_, cur) in _MARKETS.items()}
 SECTORS = ["Technology", "Healthcare", "Financials", "Industrials", "Consumer", "Energy", "Materials & Mining",
            "Real Estate", "Communication", "Utilities", "SPAC / Blank check", "Other"]
 SECTOR_WORDS = [("SPAC / Blank check", ("acquisition corp", "blank check", "spac")),
@@ -31,7 +33,9 @@ SECTOR_WORDS = [("SPAC / Blank check", ("acquisition corp", "blank check", "spac
                 ("Energy", ("energy", "oil", "gas", "solar", "renewable", "hydrogen", "power")),
                 ("Financials", ("bank", "insurance", "capital", "financial", "fintech", "securities", "asset management")),
                 ("Real Estate", ("real estate", "property", "reit")),
-                ("Consumer", ("retail", "food", "beverage", "restaurant", "consumer", "apparel", "fashion", "cosmetic", "game")),
+                ("Consumer", ("retail", "food", "beverage", "restaurant", "consumer", "apparel", "fashion", "cosmetic", "game",
+                              "tour", "travel", "hotel", "leisure", "education", "e-commerce")),
+                ("Communication", ("media", "telecom", "advertis", "entertainment", "publishing", "broadcast")),
                 ("Industrials", ("industrial", "machinery", "logistics", "aerospace", "defen", "construction", "marine", "rail"))]
 
 _http: dict[str, PoliteClient] = {}
@@ -261,53 +265,127 @@ def fetch_au() -> list[dict]:
 
 
 # ---- store -----------------------------------------------------------------------------------------------------------
-FETCHERS = {"US": fetch_us, "KR": fetch_kr, "JP": fetch_jp, "HK": fetch_hk, "AU": fetch_au}
+FETCHERS = {"Nasdaq": fetch_us, "DART": fetch_kr, "JPX": fetch_jp, "HKEX": fetch_hk, "ASX": fetch_au}
 FIELDS = {c.name for c in ipos.c}
+RANK = {"filed": 0, "upcoming": 1, "open": 2, "priced": 3, "listed": 4}
 
 
-def save(items: list[dict]) -> int:
+def _jload(text) -> dict:
+    try:
+        return json.loads(text) if text else {}
+    except ValueError:
+        return {}
+
+
+def save(items: list[dict], source: str | None = None) -> int:
+    """Store IPOs, merging the same company reported by several sources into one entry (matched by ticker or name
+    within a market). Official feeds update every field; website sources only fill gaps, add links and move the
+    status forward."""
+    from .ipo_web import SOURCES as WEB, _norm_name
     new = 0
     with get_engine().begin() as conn:
+        existing = [dict(r) for r in conn.execute(select(ipos)).mappings()]
+        by_ticker = {(r["market"], (r["ticker"] or "").upper()): r for r in existing if r.get("ticker")}
+        by_name = {(r["market"], _norm_name(r["name"])): r for r in existing}
+        uids = {r["uid"] for r in existing}
         for item in items:
-            row = {k: v for k, v in item.items() if k in FIELDS and v is not None}
-            row.setdefault("country", COUNTRY.get(item["market"]))
-            row.setdefault("currency", CURRENCY.get(item["market"]))
-            row["updated_at"] = utcnow()
-            exists = conn.execute(select(ipos.c.uid, ipos.c.doc_url).where(ipos.c.uid == row["uid"])).first()
-            if exists:
-                if exists[1] and row.get("doc_url") and row["doc_url"] != exists[1]:
-                    row["ai_done"] = False          # a newer document: read it again
-                conn.execute(update(ipos).where(ipos.c.uid == row["uid"]).values(**row))
+            src = item.get("_source") or source or "official"
+            official = src not in WEB
+            norm = item.get("_norm") or _norm_name(item["name"])
+            ticker = (item.get("ticker") or "").upper()
+            row = (by_ticker.get((item["market"], ticker)) if ticker else None) or (by_name.get((item["market"], norm)) if norm else None)
+            if row is None and item.get("uid"):
+                row = next((r for r in existing if r["uid"] == item["uid"]), None)
+            link = item.get("_link") or (WEB[src]["url"] if src in WEB else None)
+            values = {k: v for k, v in item.items() if k in FIELDS and v is not None and k not in ("uid", "details", "sources")}
+            values.setdefault("country", COUNTRY.get(item["market"]))
+            values.setdefault("currency", CURRENCY.get(item["market"]))
+            if row:
+                update_values = {}
+                for k, v in values.items():
+                    if k == "status":
+                        if official or RANK.get(v, 0) > RANK.get(row.get("status"), 0):
+                            update_values[k] = v
+                    elif official or row.get(k) in (None, ""):
+                        update_values[k] = v
+                sources = _jload(row.get("sources"))
+                had = set(sources)
+                sources[src] = link or sources.get(src)
+                details = {**(item.get("details") or {}), **_jload(row.get("details"))}
+                if official:
+                    details.update(item.get("details") or {})
+                update_values.update(sources=json.dumps(sources), details=json.dumps(details, default=str), updated_at=utcnow())
+                if row.get("doc_url") and update_values.get("doc_url") and update_values["doc_url"] != row["doc_url"]:
+                    update_values["ai_done"] = False            # a newer document: read it again
+                if not row.get("overview") and src not in had and item.get("_link"):
+                    update_values["ai_done"] = False            # a new page about the company may describe it
+                conn.execute(update(ipos).where(ipos.c.uid == row["uid"]).values(**update_values))
+                row.update(update_values)
             else:
-                row.setdefault("first_seen", date.today())
-                row["ai_done"] = False
+                base = item.get("uid") or f"{item['market']}:{(ticker or norm.replace(' ', '-') or 'x')}"[:76]
+                uid, n = base, 1
+                while uid in uids:
+                    n += 1
+                    uid = f"{base[:74]}~{n}"
+                row = {**values, "uid": uid, "first_seen": values.get("first_seen") or date.today(), "ai_done": False,
+                       "sources": json.dumps({src: link}), "details": json.dumps(item.get("details") or {}, default=str),
+                       "updated_at": utcnow()}
                 conn.execute(insert(ipos).values(**row))
+                uids.add(uid)
+                existing.append(row)
                 new += 1
+            if row.get("ticker"):
+                by_ticker[(item["market"], row["ticker"].upper())] = row
+            by_name[(item["market"], norm)] = row
     return new
 
 
-def refresh() -> int:
-    """Worker (every few hours): pull every market's IPO list."""
+def refresh() -> dict:
+    """IPO job: read every official feed and website, then tidy up. Returns {source: rows read or error}."""
+    from . import ipo_web
     if not enabled():
-        return 0
-    total = 0
-    for market, fetch in FETCHERS.items():
+        return {}
+    report = {}
+    for name, fetch in FETCHERS.items():
         try:
             items = fetch()
-            total += save(items)
+            for it in items:
+                it["_source"] = name
+            save(items, name)
+            ipo_web.record_status(name, True, len(items))
+            report[name] = len(items)
         except Exception as exc:
-            log.warning("IPO list failed for %s: %s", market, exc)
+            ipo_web.record_status(name, False, error=str(exc))
+            report[name] = f"failed: {str(exc)[:120]}"
+            log.warning("IPO source %s failed: %s", name, exc)
+    for name in ipo_web.SOURCES:
+        if name in DISABLED_WEB():
+            continue
+        try:
+            items = ipo_web.fetch(name)
+            save(items, name)
+            ipo_web.record_status(name, True, len(items))
+            report[name] = len(items)
+        except Exception as exc:
+            ipo_web.record_status(name, False, error=str(exc))
+            report[name] = f"failed: {str(exc)[:120]}"
+            log.warning("IPO website %s failed: %s", name, exc)
     with get_engine().begin() as conn:      # tidy up: drop old entries
         conn.execute(delete(ipos).where(or_(and_(ipos.c.listing_date.is_not(None), ipos.c.listing_date < date.today() - timedelta(days=120)),
                                             and_(ipos.c.listing_date.is_(None), ipos.c.first_seen < date.today() - timedelta(days=240)))))
-    return total
+    return report
+
+
+def DISABLED_WEB() -> set[str]:
+    """Websites to skip, from the secret IPO_SKIP_SITES (comma-separated names as shown on the IPOs page)."""
+    return {s.strip() for s in str(get_secret("IPO_SKIP_SITES", "") or "").split(",") if s.strip()}
 
 
 # ---- documents, AI details, first-day move ----------------------------------------------------------------------------
 PROMPT = """You are reading an IPO prospectus or listing document. Reply with JSON only:
 {{"name_en": "company name in English", "sector": one of {sectors},
- "overview": "3 to 4 plain-English sentences: what the company does, its main products and markets, scale (revenue or
- customers if stated) and what the IPO money is for",
+ "overview": "2 short plain-English sentences, at most 45 words: what the company does and for whom or where;
+ then what the IPO money is for, if stated. null if the text doesn't say what the company does",
  "market_cap": number or null (expected market value at the offer price or the middle of the price range, in the
  offer currency, only if the document gives shares outstanding after the offering or states it),
  "currency": "ISO code", "listing_date": "YYYY-MM-DD" or null (expected first trading day if stated),
@@ -354,7 +432,7 @@ def _doc_text(item: dict) -> str:
 
 
 def _ai(prompt: str) -> dict | None:
-    from .summarize import _anthropic, _gemini, providers
+    from .summarize import providers
     for provider in providers():
         try:
             reply = provider(prompt)
@@ -369,8 +447,85 @@ def _ai(prompt: str) -> dict | None:
     return None
 
 
-def enrich(limit: int = 5) -> int:
-    """Worker: read official documents for sector, market cap, overview; and record first-day moves."""
+def _ai_list(prompt: str) -> list[dict] | None:
+    from .summarize import providers
+    for provider in providers():
+        try:
+            reply = provider(prompt)
+        except Exception:
+            continue
+        m = re.search(r"\[.*\]", reply or "", re.S)
+        if m:
+            try:
+                rows = json.loads(m.group(0))
+                return [r for r in rows if isinstance(r, dict)]
+            except ValueError:
+                continue
+    return None
+
+
+SEARCH_PROMPT = """Use Google Search to find out what this company does. It is planning or has just completed an IPO.
+Company: {name}
+Country / exchange: {country} / {exchange}
+Ticker: {ticker}
+{extra}
+Reply with JSON only: {{"overview": "2 short plain-English sentences, at most 45 words: what the company does and for
+whom or where" or null, "sector": one of {sectors}, "website": "official website URL" or null}}
+Return "overview": null if you cannot find reliable information about this exact company. Never guess."""
+
+
+def _gemini_search(prompt: str) -> dict | None:
+    """Gemini with Google Search grounding, so short company descriptions come from the web, not memory."""
+    import requests
+    key = get_secret("GEMINI_API_KEY")
+    if not key:
+        return None
+    model = get_secret("GEMINI_MODEL", "gemini-2.5-flash")
+    try:
+        r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                          headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+                          json={"contents": [{"parts": [{"text": prompt}]}], "tools": [{"google_search": {}}],
+                                "generationConfig": {"temperature": 0.1}}, timeout=90)
+        r.raise_for_status()
+        parts = r.json()["candidates"][0]["content"]["parts"]
+        text = "".join(p.get("text", "") for p in parts)
+        from .summarize import _count
+        _count("gemini")
+    except Exception as exc:
+        log.info("Gemini search failed: %s", exc)
+        return None
+    m = re.search(r"\{.*\}", text, re.S)
+    try:
+        return json.loads(m.group(0)) if m else None
+    except ValueError:
+        return None
+
+
+def _web_text(item: dict) -> tuple[str, str | None]:
+    """Text about the company from the websites that list it (their company pages, not the calendar pages)."""
+    from .ipo_web import SOURCES as WEB, fetch_html, page_text
+    sources = _jload(item.get("sources"))
+    calendars = {c["url"] for c in WEB.values()}
+    pieces, website = [], None
+    for src, url in sources.items():
+        if not url or url in calendars or src not in WEB or len(pieces) >= 2:
+            continue
+        try:
+            html = fetch_html(src, url)
+        except Exception as exc:
+            log.info("IPO page %s failed: %s", url, exc)
+            continue
+        pieces.append(page_text(html, 6000))
+        m = re.search(r"Website\W{0,5}(https?://[^\s\"'<>]+)", pieces[-1], re.I)
+        website = website or (m.group(1) if m else None)
+    return "\n\n".join(pieces), website
+
+
+def enrich(limit: int = 25) -> int:
+    """IPO job: a two-line brief, sector and market cap for each new IPO. Reads, in order: the official document,
+    the company pages of the websites that list it, then (Gemini only) a Google search. Leaves the brief empty
+    rather than guessing."""
+    import time
     if not enabled():
         return 0
     with get_engine().connect() as conn:
@@ -379,32 +534,51 @@ def enrich(limit: int = 5) -> int:
     has_ai = bool(get_secret("GEMINI_API_KEY") or get_secret("ANTHROPIC_API_KEY"))
     done = 0
     for item in rows:
-        text = _doc_text(item)
         values: dict = {"ai_done": True}
+        details = _jload(item.get("details"))
+        text, src = _doc_text(item), "document"
+        website = None
+        if not text:
+            text, website = _web_text(item)
+            src = "page"
+        if website and not item.get("website"):
+            values["website"] = website[:300]
         if item.get("sec_industry"):
             values["sector"] = guess_sector(item["sec_industry"]) if guess_sector(item["sec_industry"]) != "Other" else None
-        if has_ai and (text or item.get("overview")):
-            known = {k: item.get(k) for k in ("ticker", "exchange", "listing_date", "price_low", "price_high", "raise_amount", "overview")}
+        got = None
+        if has_ai and text:
+            known = {k: item.get(k) for k in ("ticker", "exchange", "listing_date", "price_low", "price_high", "raise_amount")}
             got = _ai(PROMPT.format(sectors=json.dumps(SECTORS), name=item["name"], country=item.get("country"),
-                                    known=json.dumps(known, default=str), text=(text or item.get("overview") or "")[:24000]))
-            if got:
-                if got.get("sector") in SECTORS and not values.get("sector"):
-                    values["sector"] = got["sector"]
-                if got.get("overview"):
-                    values["overview"] = str(got["overview"])[:1500]
-                if _num(got.get("market_cap")):
-                    values["market_cap"] = _num(got["market_cap"])
-                if got.get("name_en") and item["market"] == "KR":
-                    values["name"] = str(got["name_en"])[:200]
-                if not item.get("listing_date") and got.get("listing_date"):
-                    values["listing_date"] = _date(got["listing_date"], "%Y-%m-%d")
-                for k in ("price_low", "price_high"):
-                    if not item.get(k) and _num(got.get(k)):
-                        values[k] = _num(got[k])
-        elif not text and not item.get("overview") and item["market"] in ("US", "HK", "KR"):
-            values["ai_done"] = False if not has_ai else True     # retry later once a document is found
+                                    known=json.dumps(known, default=str), text=text[:24000]))
+            time.sleep(4)                                   # stay under the free Gemini per-minute limit
+        if not (got and got.get("overview")) and get_secret("GEMINI_API_KEY"):
+            searched = _gemini_search(SEARCH_PROMPT.format(
+                name=item["name"], country=item.get("country"), exchange=item.get("exchange") or "", ticker=item.get("ticker") or "-",
+                sectors=json.dumps(SECTORS), extra=f"Industry: {details['industry']}" if details.get("industry") else ""))
+            time.sleep(4)
+            if searched and searched.get("overview"):
+                got = {**(got or {}), **{k: v for k, v in searched.items() if v}}
+                src = "search"
+        if got:
+            if got.get("sector") in SECTORS and not values.get("sector"):
+                values["sector"] = got["sector"]
+            if got.get("overview"):
+                values["overview"] = str(got["overview"])[:600]
+                values["brief_src"] = src
+            if got.get("website") and not item.get("website") and str(got["website"]).startswith("http"):
+                values["website"] = str(got["website"])[:300]
+            if _num(got.get("market_cap")):
+                values["market_cap"] = _num(got["market_cap"])
+            if got.get("name_en") and item["market"] == "KR":
+                values["name"] = str(got["name_en"])[:200]
+            if not item.get("listing_date") and got.get("listing_date"):
+                values["listing_date"] = _date(got["listing_date"], "%Y-%m-%d")
+            for k in ("price_low", "price_high"):
+                if not item.get(k) and _num(got.get(k)):
+                    values[k] = _num(got[k])
         if not values.get("sector") and not item.get("sector"):
-            values["sector"] = guess_sector(f"{item['name']} {values.get('overview') or item.get('overview') or ''}")
+            hint = f"{details.get('industry') or ''} {item['name']} {values.get('overview') or item.get('overview') or ''}"
+            values["sector"] = guess_sector(hint)
         if item["market"] == "KR" and "name" not in values and not has_ai:
             try:
                 from .translate import translate_title
@@ -418,7 +592,8 @@ def enrich(limit: int = 5) -> int:
     return done
 
 
-YAHOO = {"US": "", "JP": ".T", "HK": ".HK", "AU": ".AX"}
+YAHOO = {"US": "", "JP": ".T", "HK": ".HK", "AU": ".AX", "IN": ".NS", "FR": ".PA", "NL": ".AS", "IT": ".MI", "NO": ".OL",
+         "BE": ".BR", "PT": ".LS", "IE": ".IR", "ID": ".JK"}
 
 
 def _first_day_moves() -> None:

@@ -185,8 +185,14 @@ def sources_panel() -> None:
         st.warning("Needs a look: " + ", ".join(r["country"] for r in problems) + ". Paused sources resume by themselves; "
                    "a market 'not updating' for a day may mean its website changed.")
     ipo_rows = status.ipo_sources()
-    st.caption("IPO sources: " + "  ·  ".join(
-        f"{STATE[r['state']][0]} {r['country']} ({r['count']}, {relative_time(r['last_ok']) if r['last_ok'] else 'not yet'})" for r in ipo_rows))
+    with st.expander("IPO sources (job runs every 4 hours)"):
+        html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Source</th><th>Covers</th><th>State</th>'
+                   '<th class="num">IPOs read</th><th>Last success</th><th>Last error</th></tr>' + "".join(
+                       f'<tr><td>{esc(r["source"])}</td><td>{esc(r["country"])}</td>'
+                       f'<td><span style="color:{STATE[r["state"]][1]}">{STATE[r["state"]][0]}</span> {STATE[r["state"]][2]}</td>'
+                       f'<td class="num">{r["count"]}</td><td>{relative_time(r["last_ok"]) if r["last_ok"] else "not yet"}</td>'
+                       f'<td>{esc(r["error"][:90])}</td></tr>' for r in ipo_rows) + "</table></div>")
+        st.caption("To skip a website, add its name to the IPO_SKIP_SITES secret (comma-separated) on GitHub.")
 
 
 def member_tools(me: dict, rows) -> None:

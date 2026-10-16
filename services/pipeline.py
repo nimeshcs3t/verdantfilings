@@ -368,7 +368,7 @@ def run_once() -> dict:
             except Exception as exc:
                 stats["errors"] += 1
                 log.warning("sync failed for %s:%s: %s", market, ticker, exc)
-        from . import bot, briefs, digests, events, financials, housekeeping, insiders, ipos, journal, logos, notes, portfolio, signals
+        from . import bot, briefs, digests, events, financials, housekeeping, insiders, journal, logos, notes, portfolio, signals
         from .alerts import run_alerts
         # (stats key, job, minimum minutes between runs; 0 = every run)
         steps = [("retranslated", retranslate_titles, 0), ("summaries", process_overviews, 0), (None, run_alerts, 0),
@@ -378,7 +378,8 @@ def run_once() -> dict:
                  ("fair_value", _fair_value_alerts, 30), ("journal", journal.send_reminders, 60),
                  ("report_notes", notes.refresh, 60), ("insider_alerts", signals.send_insider_alerts, 60),
                  ("new_listings", signals.send_new_listing_alerts, 360), ("morning", digests.morning_briefs, 0),
-                 ("monthly", digests.monthly_reports, 0), ("ipos", ipos.refresh, 240), ("ipo_details", ipos.enrich, 30), ("prices", _refresh_prices, 60), ("ipo_alerts", ipos.send_alerts, 30)]
+                 ("monthly", digests.monthly_reports, 0), ("prices", _refresh_prices, 60)]
+        # IPOs run in their own job (ipo_worker.py, workflow "IPO calendar"), so a slow run here can't skip them.
         for key, step, every in steps:
             if every and not _due(f"job:{key}", every):
                 continue

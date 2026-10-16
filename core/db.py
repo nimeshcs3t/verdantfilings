@@ -483,6 +483,11 @@ ipos = Table(
     Column("ai_done", Boolean, nullable=False, default=False),
     Column("first_seen", Date),
     Column("updated_at", DateTime(timezone=True), default=utcnow),
+    Column("open_date", Date),                # subscription / book-building opens
+    Column("underwriters", String(300)),
+    Column("sources", Text),                  # JSON {source name: page url}
+    Column("details", Text),                  # JSON of extra facts (lot size, ISIN, rating...)
+    Column("brief_src", String(20)),          # where the brief came from: document | page | website | search
     Index("ix_ipos_date", "listing_date"),
 )
 
@@ -530,7 +535,9 @@ shared_list_items = Table(
 UPGRADES = [("journal", "target_price", "FLOAT"), ("company_meta", "shares", "FLOAT"),
             ("users", "totp_secret", "VARCHAR(64)"), ("users", "totp_last_step", "INTEGER"), ("users", "backup_codes", "TEXT"),
             ("sessions", "created_at", "TIMESTAMP WITH TIME ZONE"), ("sessions", "last_seen", "TIMESTAMP WITH TIME ZONE"), ("sessions", "device", "VARCHAR(80)"),
-            ("sessions", "ip", "VARCHAR(64)"), ("sessions", "remember", "BOOLEAN"), ("share_links", "expires_at", "TIMESTAMP WITH TIME ZONE")]
+            ("sessions", "ip", "VARCHAR(64)"), ("sessions", "remember", "BOOLEAN"), ("share_links", "expires_at", "TIMESTAMP WITH TIME ZONE"),
+            ("ipos", "open_date", "DATE"), ("ipos", "underwriters", "VARCHAR(300)"), ("ipos", "sources", "TEXT"),
+            ("ipos", "details", "TEXT"), ("ipos", "brief_src", "VARCHAR(20)")]
 
 _engine: Engine | None = None
 _lock = threading.Lock()

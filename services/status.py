@@ -60,14 +60,17 @@ def markets() -> list[dict]:
 
 
 def ipo_sources() -> list[dict]:
-    from services.ipos import COUNTRY
-    with get_engine().connect() as conn:
-        rows = dict(conn.execute(select(ipos.c.market, func.max(ipos.c.updated_at)).group_by(ipos.c.market)).all())
-        counts = dict(conn.execute(select(ipos.c.market, func.count()).group_by(ipos.c.market)).all())
+    """One row per IPO source (official feeds and websites): state, rows read last time, last success, last error."""
+    from services.ipo_web import MARKETS, source_status
     out = []
-    for m, country in COUNTRY.items():
-        last = as_utc(rows[m]) if rows.get(m) else None
-        paused = _paused([IPO_PAUSE[m]]) if m in IPO_PAUSE else None
-        state = "paused" if paused else "ok" if last and utcnow() - last < timedelta(hours=10) else "problem" if last else "idle"
-        out.append({"market": m, "country": country, "state": state, "last_ok": last, "count": counts.get(m, 0), "paused": paused})
+    for r in source_status():
+        last_ok = datetime.fromisoformat(r["last_ok"]) if r.get("last_ok") else None
+        failing = bool(r.get("error"))
+        state = ("problem" if failing and (not last_ok or utcnow() - last_ok > timedelta(hours=24)) else
+                 "warning" if failing else "ok" if last_ok and utcnow() - last_ok < timedelta(hours=12) else
+                 "problem" if last_ok else "idle")
+        market = r["market"]
+        country = "Euronext" if market == "EURONEXT" else MARKETS.get(market, (market,))[0]
+        out.append({"source": r["source"], "market": market, "country": country, "state": state, "last_ok": last_ok,
+                    "count": r.get("count", 0), "error": r.get("error") or ""})
     return out

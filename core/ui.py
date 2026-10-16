@@ -206,6 +206,15 @@ def css() -> str:
 .ipo-facts {{ display:flex; flex-wrap:wrap; gap:6px 18px; margin:6px 0 4px; font-size:.86rem; color:var(--ink); }}
 .ipo-facts b {{ color:var(--muted); font-weight:500; margin-right:4px; }}
 .ipo-ov {{ font-size:.9rem; line-height:1.5; color:var(--body-en); margin:4px 0; }}
+.ipo-brief {{ font-size:.92rem; line-height:1.5; color:var(--body-en); margin:6px 0 4px; max-width:860px; }}
+.ipo-brief.none {{ color:var(--muted); font-size:.82rem; font-style:italic; }}
+.ipo-src {{ color:var(--muted); font-size:.74rem; }}
+.fl-flag.open {{ background:var(--up); color:#fff; border-color:var(--up); }}
+.ipo-srcs {{ display:flex; flex-wrap:wrap; gap:6px 8px; }}
+.ipo-srcs span {{ border:1px solid var(--rule); border-radius:999px; padding:2px 10px; font-size:.82rem; }}
+.ipo-srcs span::before {{ content:"●"; margin-right:6px; }}
+.ipo-srcs .s-ok::before {{ color:var(--up); }} .ipo-srcs .s-warning::before, .ipo-srcs .s-paused::before {{ color:var(--amber); }}
+.ipo-srcs .s-problem::before {{ color:var(--down); }} .ipo-srcs .s-idle::before {{ color:var(--muted); }}
 .ipo-meta {{ font-size:.82rem; color:var(--muted); }}
 .ipo-meta a {{ color:var(--pine); text-decoration:none; font-weight:500; }}
 .ipo .mv {{ margin-left:8px; }}

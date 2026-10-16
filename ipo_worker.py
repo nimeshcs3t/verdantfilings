@@ -1,5 +1,5 @@
 """IPO calendar job: reads every official feed and IPO website, writes two-line briefs, records first-day moves and
-sends IPO alerts. Run by GitHub Actions every 4 hours (.github/workflows/ipos.yml), or manually: python ipo_worker.py
+sends IPO alerts. Run by GitHub Actions twice a day (.github/workflows/ipos.yml), or manually: python ipo_worker.py
 """
 import json
 import logging
@@ -7,6 +7,14 @@ import os
 import time
 
 os.environ.setdefault("DIRECT_FETCH", "true")
+
+import warnings  # noqa: E402
+
+try:  # harmless notice from reading DART's XML with the HTML parser
+    from bs4 import XMLParsedAsHTMLWarning
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+except ImportError:
+    pass
 
 from core.usage import set_state  # noqa: E402
 from services import ipos  # noqa: E402

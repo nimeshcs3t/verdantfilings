@@ -296,7 +296,7 @@ def save(items: list[dict], source: str | None = None) -> int:
             row = (by_ticker.get((item["market"], ticker)) if ticker else None) or (by_name.get((item["market"], norm)) if norm else None)
             if row is None and item.get("uid"):
                 row = next((r for r in existing if r["uid"] == item["uid"]), None)
-            link = item.get("_link") or (WEB[src]["url"] if src in WEB else None)
+            link = item.get("_link") or (WEB[src].get("url") if src in WEB else None)
             values = {k: v for k, v in item.items() if k in FIELDS and v is not None and k not in ("uid", "details", "sources")}
             values.setdefault("country", COUNTRY.get(item["market"]))
             values.setdefault("currency", CURRENCY.get(item["market"]))
@@ -476,21 +476,13 @@ Return "overview": null if you cannot find reliable information about this exact
 
 def _gemini_search(prompt: str) -> dict | None:
     """Gemini with Google Search grounding, so short company descriptions come from the web, not memory."""
-    import requests
-    key = get_secret("GEMINI_API_KEY")
-    if not key:
-        return None
-    model = get_secret("GEMINI_MODEL", "gemini-2.5-flash")
+    from .summarize import gemini_request
     try:
-        r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                          headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-                          json={"contents": [{"parts": [{"text": prompt}]}], "tools": [{"google_search": {}}],
-                                "generationConfig": {"temperature": 0.1}}, timeout=90)
-        r.raise_for_status()
-        parts = r.json()["candidates"][0]["content"]["parts"]
-        text = "".join(p.get("text", "") for p in parts)
-        from .summarize import _count
-        _count("gemini")
+        data = gemini_request({"contents": [{"parts": [{"text": prompt}]}], "tools": [{"google_search": {}}],
+                               "generationConfig": {"temperature": 0.1}}, timeout=90)
+        if not data:
+            return None
+        text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
     except Exception as exc:
         log.info("Gemini search failed: %s", exc)
         return None
@@ -505,7 +497,7 @@ def _web_text(item: dict) -> tuple[str, str | None]:
     """Text about the company from the websites that list it (their company pages, not the calendar pages)."""
     from .ipo_web import SOURCES as WEB, fetch_html, page_text
     sources = _jload(item.get("sources"))
-    calendars = {c["url"] for c in WEB.values()}
+    calendars = {c.get("url") for c in WEB.values()}
     pieces, website = [], None
     for src, url in sources.items():
         if not url or url in calendars or src not in WEB or len(pieces) >= 2:
@@ -528,9 +520,19 @@ def enrich(limit: int = 25) -> int:
     import time
     if not enabled():
         return 0
+    today = date.today()
     with get_engine().connect() as conn:
-        rows = [dict(r) for r in conn.execute(select(ipos).where(ipos.c.ai_done == False)  # noqa: E712
-                                              .order_by(ipos.c.listing_date.is_(None), ipos.c.listing_date).limit(limit)).mappings()]
+        fresh = [dict(r) for r in conn.execute(select(ipos).where(ipos.c.ai_done == False)  # noqa: E712
+                                               .order_by(ipos.c.listing_date.is_(None), ipos.c.listing_date).limit(limit)).mappings()]
+        retry = [dict(r) for r in conn.execute(select(ipos).where(
+            ipos.c.ai_done == True, ipos.c.overview.is_(None),  # noqa: E712
+            or_(ipos.c.listing_date.is_(None), ipos.c.listing_date >= today - timedelta(days=7)))).mappings()]
+
+    def due(r) -> bool:                     # no brief yet: try again a day later, at most 3 times
+        d = _jload(r.get("details"))
+        last = d.get("brief_last")
+        return d.get("brief_tries", 0) < 3 and (not last or last < (today - timedelta(days=1)).isoformat())
+    rows = (fresh + [r for r in retry if due(r)])[:limit]
     has_ai = bool(get_secret("GEMINI_API_KEY") or get_secret("ANTHROPIC_API_KEY"))
     done = 0
     for item in rows:
@@ -576,6 +578,9 @@ def enrich(limit: int = 25) -> int:
             for k in ("price_low", "price_high"):
                 if not item.get(k) and _num(got.get(k)):
                     values[k] = _num(got[k])
+        if not values.get("overview"):
+            details.update(brief_tries=details.get("brief_tries", 0) + 1, brief_last=today.isoformat())
+            values["details"] = json.dumps(details, default=str)
         if not values.get("sector") and not item.get("sector"):
             hint = f"{details.get('industry') or ''} {item['name']} {values.get('overview') or item.get('overview') or ''}"
             values["sector"] = guess_sector(hint)
@@ -587,7 +592,7 @@ def enrich(limit: int = 25) -> int:
                 pass
         with get_engine().begin() as conn:
             conn.execute(update(ipos).where(ipos.c.uid == item["uid"]).values(**{k: v for k, v in values.items() if v is not None or k == "ai_done"}))
-        done += 1
+        done += 1 if values.get("overview") else 0
     _first_day_moves()
     return done
 

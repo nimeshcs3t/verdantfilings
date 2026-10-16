@@ -34,9 +34,10 @@ SOURCES = {
     "AAStocks": {"url": "https://www.aastocks.com/en/stocks/market/ipo/upcomingipo/company-summary", "market": "HK", "date": "ymd"},
     "IPO Watch": {"url": "https://ipowatch.in/upcoming-ipo-calendar-ipo-list/", "market": "IN", "date": "dmy", "window": True,
                   "listing_after": 3},
-    "Kalkine": {"url": "https://kalkine.com.au/stocks/upcoming-ipo", "market": "AU", "date": "mdy", "announced": True},
     "IPO Kiso": {"url": "https://www.ipokiso.com/", "market": "JP", "date": "md"},
     "e-IPO": {"url": "https://e-ipo.co.id/en", "market": "ID", "mode": "ai"},
+    # Backup for India when IPO Watch refuses cloud servers: Gemini with Google Search lists current mainboard IPOs.
+    "India (web search)": {"url": None, "market": "IN", "mode": "search"},
 }
 
 # column name (lower case) -> field. First match wins, so specific names come before general ones.
@@ -196,8 +197,10 @@ def fetch_html(source: str, url: str) -> str:
     from sources.webhttp import PoliteClient
     if source not in _clients:
         key = re.sub(r"\W", "", source.lower())
-        _clients[source] = PoliteClient(f"ipoweb_{key}", pause=1.0, block_hours=12,
-                                        headers={"Accept": "text/html,application/xhtml+xml"})
+        _clients[source] = PoliteClient(f"ipoweb_{key}", pause=1.0, block_hours=12, headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9", "Upgrade-Insecure-Requests": "1", "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none", "Sec-Fetch-User": "?1"})
     r = _clients[source].get(url, timeout=40)
     if not r.encoding or r.encoding.lower() == "iso-8859-1":
         r.encoding = r.apparent_encoding
@@ -392,9 +395,59 @@ def ai_items(source: str, cfg: dict, html: str, today: date) -> list[dict]:
 
 
 # ---- run ----------------------------------------------------------------------------------------------------------
+SEARCH_LIST_PROMPT = """Use Google Search to list the mainboard IPOs in {country} that are open for subscription now,
+open in the next 3 weeks, or listed in the last 7 days. Today is {today}. Only include IPOs you find in current search
+results, with dates from those results; skip SME issues. Reply with a JSON list only:
+[{{"name": "...", "ticker": "..." or null, "sector": "..." or null, "open_date": "YYYY-MM-DD" or null,
+"close_date": "YYYY-MM-DD" or null, "listing_date": "YYYY-MM-DD" or null, "price_low": number or null,
+"price_high": number or null, "issue_size": "e.g. 1,450 crore" or null, "status": "upcoming" | "open" | "listed"}}]
+An empty list is fine. Never guess."""
+
+
+def search_items(source: str, cfg: dict, today: date) -> list[dict]:
+    from .summarize import gemini_request
+    country, currency = MARKETS[cfg["market"]]
+    data = gemini_request({"contents": [{"parts": [{"text": SEARCH_LIST_PROMPT.format(country=country, today=today.isoformat())}]}],
+                           "tools": [{"google_search": {}}], "generationConfig": {"temperature": 0.1}}, timeout=120)
+    if not data:
+        raise RuntimeError("needs GEMINI_API_KEY")
+    text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+    m = re.search(r"\[.*\]", text, re.S)
+    try:
+        rows = json.loads(m.group(0)) if m else []
+    except ValueError:
+        rows = []
+    out = []
+    for r in rows:
+        if not isinstance(r, dict) or not clean(r.get("name")):
+            continue
+        name = clean(r["name"])[:200]
+        item = {"market": cfg["market"], "country": country, "currency": currency, "name": name,
+                "ticker": (clean(r.get("ticker")).upper() or None), "_source": source, "_link": None,
+                "_norm": _norm_name(name), "details": {}}
+        for k in ("open_date", "close_date", "listing_date"):
+            item[k] = parse_date(r.get(k) or "", "ymd", today)
+        item["price_low"], item["price_high"] = (amount(r.get("price_low")) if r.get("price_low") is not None else None,
+                                                 amount(r.get("price_high")) if r.get("price_high") is not None else None)
+        if r.get("issue_size"):
+            item["raise_amount"] = amount(r["issue_size"])
+        if r.get("sector"):
+            item["details"]["industry"] = clean(r["sector"])[:80]
+        if item["close_date"] and not item["listing_date"]:
+            item["listing_date"] = business_days_after(item["close_date"], 3)
+            item["details"]["listing_estimated"] = True
+        item["status"] = status_of(item, str(r.get("status") or ""), today)
+        if item.get("listing_date") and item["listing_date"] < today - timedelta(days=14):
+            continue
+        out.append(item)
+    return out
+
+
 def fetch(source: str, today: date | None = None) -> list[dict]:
     today = today or date.today()
     cfg = SOURCES[source]
+    if cfg.get("mode") == "search":
+        return search_items(source, cfg, today)
     html = fetch_html(source, cfg["url"])
     if cfg.get("mode") == "ai":
         return ai_items(source, cfg, html, today)

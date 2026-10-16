@@ -33,21 +33,66 @@ def _count(key: str) -> None:
         pass
 
 
-def _gemini(prompt: str) -> str | None:
+GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+_gemini_model: list[str] = []          # the model that last worked, remembered for this run
+
+
+def _discover_models(key: str) -> list[str]:
+    """Ask Google which Flash text models this key can use, newest first."""
+    try:
+        r = requests.get("https://generativelanguage.googleapis.com/v1beta/models", headers={"x-goog-api-key": key},
+                         params={"pageSize": 200}, timeout=30)
+        r.raise_for_status()
+        names = [m["name"].split("/", 1)[-1] for m in r.json().get("models", [])
+                 if "generateContent" in (m.get("supportedGenerationMethods") or [])]
+    except Exception:
+        return []
+    skip = ("preview", "image", "tts", "live", "audio", "embedding", "thinking", "exp", "-latest")
+    flash = [n for n in names if "flash" in n and not any(w in n for w in skip)]
+
+    def version(n: str):
+        m = re.search(r"gemini-(\d+)(?:\.(\d+))?", n)
+        return (int(m.group(1)), int(m.group(2) or 0), "lite" not in n) if m else (0, 0, False)
+    return sorted(flash, key=version, reverse=True)
+
+
+def gemini_request(body: dict, timeout: int = 60) -> dict | None:
+    """POST to Gemini generateContent, trying the configured model, then current Flash models, then whatever the
+    key can use. Returns the JSON reply, or None without a key. Raises on other errors (e.g. rate limits)."""
     key = get_secret("GEMINI_API_KEY")
     if not key:
         return None
-    model = get_secret("GEMINI_MODEL", "gemini-2.5-flash")
-    r = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-        headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-        json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2}},
-        timeout=60)
-    if r.status_code == 429:
-        _count("gem-limit")
-    r.raise_for_status()
-    _count("gemini")
-    return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    configured = get_secret("GEMINI_MODEL")
+    tried, candidates = set(), ([*_gemini_model] + ([configured] if configured else []) + GEMINI_MODELS)
+    last_error = None
+    for attempt in range(2):
+        for model in candidates:
+            if not model or model in tried:
+                continue
+            tried.add(model)
+            r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                              headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=body, timeout=timeout)
+            if r.status_code in (404, 400) and ("not found" in r.text.lower() or "no longer available" in r.text.lower()
+                                                or r.status_code == 404):
+                last_error = f"{model}: {r.status_code}"
+                continue
+            if r.status_code == 429:
+                _count("gem-limit")
+            r.raise_for_status()
+            _count("gemini")
+            if not _gemini_model or _gemini_model[0] != model:
+                _gemini_model[:] = [model]
+            return r.json()
+        if attempt == 0:
+            candidates = _discover_models(key)
+    raise RuntimeError(f"no Gemini model available for this key ({last_error})")
+
+
+def _gemini(prompt: str) -> str | None:
+    data = gemini_request({"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2}})
+    if data is None:
+        return None
+    return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"]).strip()
 
 
 def _anthropic(prompt: str) -> str | None:

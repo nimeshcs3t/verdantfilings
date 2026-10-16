@@ -39,3 +39,4 @@ jobs:
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           APP_URL: ${{ secrets.APP_URL }}
           IPO_SKIP_SITES: ${{ secrets.IPO_SKIP_SITES }}
+          IPO_AI_PER_DAY: ${{ secrets.IPO_AI_PER_DAY }}

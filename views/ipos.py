@@ -219,7 +219,7 @@ def _sources_note() -> None:
             f'{" · " + str(r["count"]) if r["count"] else ""}</small></span>' for r in rows) + "</div>")
         st.caption("Official feeds: Nasdaq and SEC (USA), DART (Korea), JPX (Japan), HKEX (Hong Kong), ASX (Australia). "
                    "IPO websites: Iposcoop, Renaissance Capital, StockAnalysis (USA), Euronext (France, Netherlands, "
-                   "Italy, Norway, Belgium, Portugal, Ireland), AAStocks (Hong Kong), IPO Watch (India), Kalkine "
-                   "(Australia), IPO Kiso (Japan), e-IPO (Indonesia). The same IPO from several sources is shown once. "
+                   "Italy, Norway, Belgium, Portugal, Ireland), AAStocks (Hong Kong), IPO Watch and a Google search "
+                   "(India), IPO Kiso (Japan), e-IPO (Indonesia). The same IPO from several sources is shown once. "
                    "Briefs come from the prospectus, the listing page or a web search; check the official document "
                    "before relying on any detail. Not investment advice.")

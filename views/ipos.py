@@ -7,7 +7,8 @@ from core.ui import esc, html_block, logo_html, page_header
 from services import ipos as ipo_svc
 
 STATUS = {"filed": "Filed", "upcoming": "Upcoming", "open": "Open now", "priced": "Priced", "listed": "Listed"}
-BRIEF_SRC = {"document": "from the prospectus", "page": "from the listing page", "search": "from a web search"}
+BRIEF_SRC = {"document": "from the prospectus", "page": "from the listing page", "search": "from a web search",
+             "website": "from the company website"}
 SECTOR_CHIP = {"Technology": "contract", "Healthcare": "dividend", "Financials": "buyback", "Industrials": "board",
                "Consumer": "capital", "Energy": "mna", "Materials & Mining": "ownership", "Real Estate": "periodic",
                "Communication": "meeting", "Utilities": "earnings", "SPAC / Blank check": "insider", "Other": "other"}
@@ -145,11 +146,11 @@ def _when(r) -> date:
 
 
 def page() -> None:
-    page_header("Upcoming IPOs", "New listings across the USA, Europe, Asia and Australia, gathered from exchanges and "
-                "IPO calendar websites, with a short brief on each company.")
+    page_header("Upcoming IPOs", "New listings in the USA, Europe, Korea, Japan, Hong Kong and Australia, from the "
+                "exchanges and IPO calendar websites, with a short brief on each company.")
     rows = ipo_svc.listing()
     if not rows:
-        html_block('<div class="empty">No IPOs loaded yet. They load every 4 hours; the admin can run '
+        html_block('<div class="empty">No IPOs loaded yet. They load twice a day; the admin can run '
                    '<b>IPO calendar</b> on GitHub (Actions) to load them now.</div>')
         return
     today = date.today()
@@ -218,8 +219,7 @@ def _sources_note() -> None:
             f'<span class="s-{r["state"]}">{esc(r["source"])} <small>{esc(r["country"])}'
             f'{" · " + str(r["count"]) if r["count"] else ""}</small></span>' for r in rows) + "</div>")
         st.caption("Official feeds: Nasdaq and SEC (USA), DART (Korea), JPX (Japan), HKEX (Hong Kong), ASX (Australia). "
-                   "IPO websites: Iposcoop, Renaissance Capital, StockAnalysis (USA), Euronext (France, Netherlands, "
-                   "Italy, Norway, Belgium, Portugal, Ireland), AAStocks (Hong Kong), IPO Watch and a Google search "
-                   "(India), IPO Kiso (Japan), e-IPO (Indonesia). The same IPO from several sources is shown once. "
-                   "Briefs come from the prospectus, the listing page or a web search; check the official document "
+                   "Websites: Iposcoop (USA), Euronext (France, Netherlands, Italy, Norway, Belgium, Portugal, Ireland), "
+                   "AAStocks (Hong Kong). Updated twice a day. The same IPO from several sources is shown once. "
+                   "Briefs come from the prospectus, the listing page or the company's website; check the official document "
                    "before relying on any detail. Not investment advice.")

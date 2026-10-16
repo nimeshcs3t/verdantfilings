@@ -33,8 +33,50 @@ def _count(key: str) -> None:
         pass
 
 
-GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash"]
 _gemini_model: list[str] = []          # the model that last worked, remembered for this run
+_limited: set[str] = set()             # models that hit their daily limit during this run
+COOLDOWN_KEY = "gemini_cooldown_until"
+
+
+class GeminiBusy(RuntimeError):
+    """Every usable Gemini model is at its limit; try again later."""
+
+
+def gemini_cooling() -> bool:
+    try:
+        from datetime import datetime, timezone
+        from core.usage import get_state
+        until = get_state(COOLDOWN_KEY)
+        return bool(until and datetime.fromisoformat(until) > datetime.now(timezone.utc))
+    except Exception:
+        return False
+
+
+def _cool_down(minutes: int = 30) -> None:
+    try:
+        from datetime import datetime, timedelta, timezone
+        from core.usage import set_state
+        set_state(COOLDOWN_KEY, (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat())
+    except Exception:
+        pass
+
+
+def _retry_info(r) -> tuple[float | None, bool]:
+    """(seconds Google asks us to wait, whether it's a daily limit) from a 429 reply."""
+    try:
+        details = r.json().get("error", {}).get("details", [])
+    except Exception:
+        return None, False
+    wait, daily = None, False
+    for d in details:
+        if str(d.get("@type", "")).endswith("RetryInfo"):
+            m = re.match(r"([\d.]+)s", str(d.get("retryDelay", "")))
+            wait = float(m.group(1)) if m else None
+        for v in d.get("violations", []) or []:
+            if "perday" in str(v.get("quotaId", "")).lower() or "per_day" in str(v.get("quotaId", "")).lower():
+                daily = True
+    return wait, daily
 
 
 def _discover_models(key: str) -> list[str]:
@@ -56,28 +98,42 @@ def _discover_models(key: str) -> list[str]:
     return sorted(flash, key=version, reverse=True)
 
 
-def gemini_request(body: dict, timeout: int = 60) -> dict | None:
+def gemini_request(body: dict, timeout: int = 60, light: bool = False) -> dict | None:
     """POST to Gemini generateContent, trying the configured model, then current Flash models, then whatever the
     key can use. Returns the JSON reply, or None without a key. Raises on other errors (e.g. rate limits)."""
     key = get_secret("GEMINI_API_KEY")
     if not key:
         return None
+    if gemini_cooling():
+        raise GeminiBusy("Gemini is at its usage limit; paused for a while")
+    import time
     configured = get_secret("GEMINI_MODEL")
-    tried, candidates = set(), ([*_gemini_model] + ([configured] if configured else []) + GEMINI_MODELS)
-    last_error = None
+    tried, candidates = set(_limited), ([*_gemini_model] + ([configured] if configured else []) + GEMINI_MODELS)
+    if light:                               # small jobs: use the lightest models first, sparing the main allowance
+        candidates = sorted(dict.fromkeys(candidates), key=lambda m: "lite" not in m)
+    last_error, saw_limit = None, False
     for attempt in range(2):
         for model in candidates:
             if not model or model in tried:
                 continue
             tried.add(model)
-            r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                              headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=body, timeout=timeout)
-            if r.status_code in (404, 400) and ("not found" in r.text.lower() or "no longer available" in r.text.lower()
-                                                or r.status_code == 404):
-                last_error = f"{model}: {r.status_code}"
-                continue
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            r = requests.post(url, headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=body, timeout=timeout)
             if r.status_code == 429:
                 _count("gem-limit")
+                wait, daily = _retry_info(r)
+                if not daily and wait is not None and wait <= 65:      # per-minute limit: wait once, same model
+                    time.sleep(wait + 1)
+                    r = requests.post(url, headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=body,
+                                      timeout=timeout)
+                if r.status_code == 429:
+                    _limited.add(model)
+                    saw_limit, last_error = True, f"{model}: 429"
+                    continue
+            if r.status_code in (404, 400) and ("not found" in r.text.lower() or "no longer available" in r.text.lower()
+                                                or "not supported" in r.text.lower() or r.status_code == 404):
+                last_error = f"{model}: {r.status_code}"
+                continue
             r.raise_for_status()
             _count("gemini")
             if not _gemini_model or _gemini_model[0] != model:
@@ -85,6 +141,9 @@ def gemini_request(body: dict, timeout: int = 60) -> dict | None:
             return r.json()
         if attempt == 0:
             candidates = _discover_models(key)
+    if saw_limit:
+        _cool_down(30)
+        raise GeminiBusy(f"every Gemini model is at its usage limit ({last_error}); paused 30 minutes")
     raise RuntimeError(f"no Gemini model available for this key ({last_error})")
 
 

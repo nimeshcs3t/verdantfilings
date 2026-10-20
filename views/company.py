@@ -9,7 +9,8 @@ from services.classify import ORDER, categorize, label as cat_label
 from services.pipeline import filings_for, get_company, search_companies, sync_company
 from sources import Company, configured_sources, get_source, visible_sources
 
-from .components import cached_english_news, cached_local_news, price_history, render_filing, render_news
+from .components import (cached_english_news, cached_local_news, cached_substack, price_history, render_filing,
+                         render_news, render_substack)
 
 
 def _selection(wl: list[dict]):
@@ -194,12 +195,17 @@ def page() -> None:
 
     with tab_news:
         local_label = f"{src.country} press, translated"
-        options = ["English press"] + ([local_label] if src.news_local else [])
+        options = ["English press"] + ([local_label] if src.news_local else []) + ["Substack"]
         press = st.segmented_control("Press", options, default="English press", key="co-press",
-                                     label_visibility="collapsed") if len(options) > 1 else "English press"
+                                     label_visibility="collapsed") or "English press"
         if press == local_label:
             with st.spinner("Translating headlines"):
                 render_news(cached_local_news(market, comp["name_local"]))
+        elif press == "Substack":
+            from services import settings as settings_svc
+            follows = tuple(settings_svc.get(user["id"]).get("substack_feeds") or [])
+            with st.spinner("Looking for Substack posts"):
+                render_substack(cached_substack(comp["name_en"], comp["ticker"], follows))
         else:
             render_news(cached_english_news(comp["name_en"], comp["ticker"]))
 

@@ -183,6 +183,30 @@ def cached_local_news(market: str, name_local: str, limit: int = 10) -> list[dic
     return news.local_news(name_local, src.news_local, src.source_lang, limit)
 
 
+@st.cache_data(ttl=10800, show_spinner=False)
+def cached_substack(name_en: str, ticker: str, newsletters: tuple = ()) -> list[dict]:
+    from services import substack
+    return substack.posts_for(name_en, ticker, list(newsletters))
+
+
+def render_substack(posts: list[dict]) -> None:
+    if not posts:
+        html_block('<div class="empty">No recent Substack posts found about this company. Add newsletters you read '
+                   'under Account, then Substack, to include their posts.</div>')
+        return
+    rows = []
+    for p in posts:
+        when = p["published"].strftime("%d %b %Y") if p.get("published") else ""
+        tags = ('<span class="ss-tag mine">Following</span>' if p.get("from") == "followed" else "") + \
+               ('<span class="ss-tag paid">Paid</span>' if p.get("paid") else "")
+        rows.append(f'<div class="ss-post"><a href="{esc(p["link"])}" target="_blank" rel="noopener noreferrer">{esc(p["title"])}</a>{tags}'
+                    + (f'<div class="ss-sum">{esc(p["summary"])}</div>' if p.get("summary") else "")
+                    + f'<div class="ss-meta">{esc(p.get("source") or "Substack")}{" · " + when if when else ""}</div></div>')
+    html_block("".join(rows))
+    st.caption("From Substack's search and the newsletters you follow; posts are matched by company name or ticker, "
+               "so an occasional one may be off-topic. Opinions are the authors' own.")
+
+
 def render_news(items: list[dict]) -> None:
     if items:
         html_block(news_html(items))

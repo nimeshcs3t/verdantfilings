@@ -158,6 +158,22 @@ def delivery_settings(user: dict) -> None:
                 personal.save_prefs(user["id"], weekly=True)
             st.success("Saved.")
 
+    st.subheader("Substack", divider=False)
+    st.caption("Newsletters you read. Their posts that mention your companies appear first on each company's News tab "
+               "(Substack). One per line: the newsletter name from its address (e.g. 'thegeneralist' for "
+               "thegeneralist.substack.com) or its own web address.")
+    with st.form("substack-settings", border=False):
+        current = "\n".join(prefs.get("substack_feeds") or [])
+        text = st.text_area("Newsletters", value=current, height=110, label_visibility="collapsed",
+                            placeholder="thegeneralist\nhttps://www.netinterest.co")
+        if st.form_submit_button("Save newsletters"):
+            from services.substack import feed_url
+            items = [line.strip() for line in text.splitlines() if line.strip()][:30]
+            bad = [i for i in items if not feed_url(i)]
+            settings_svc.save(user["id"], substack_feeds=[i for i in items if feed_url(i)])
+            st.success(f"Saved {len(items) - len(bad)} newsletter{'s' if len(items) - len(bad) != 1 else ''}."
+                       + (f" Skipped: {', '.join(bad)}." if bad else ""))
+
     st.subheader("Signals", divider=False)
     from sources import visible_sources
     markets = {s.country: s.market for s in visible_sources(user)}

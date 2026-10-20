@@ -8,7 +8,7 @@ from datetime import timedelta
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.exc import IntegrityError
 
-from core.db import as_utc, get_engine, keywords, notes, sessions, stars, user_prefs, utcnow, watch_prefs
+from core.db import as_utc, filing_marks, get_engine, keywords, notes, sessions, stars, user_prefs, utcnow, watch_prefs
 
 DEFAULT_PREFS = {"alert_mode": "instant", "digest_hour": 18, "tz": "UTC", "skip_insider": False, "weekly": True,
                  "last_digest": None, "last_weekly": None}
@@ -29,6 +29,38 @@ def toggle_star(user_id: int, uid: str) -> bool:
             return False
         conn.execute(insert(stars).values(user_id=user_id, uid=uid, created_at=utcnow()))
         return True
+
+
+# ---- flags: important (= star), keep, read once ------------------------------------------
+MARKS = ("important", "keep", "read_once")
+MARK_LABELS = {"important": "★ Important", "keep": "Keep", "read_once": "Read once"}
+
+
+class Flags(dict):
+    """uid -> 'important' | 'keep' | 'read_once'. `uid in flags` means 'important', like the old starred set."""
+    def __contains__(self, uid) -> bool:
+        return dict.get(self, uid) == "important"
+
+
+def flags(user_id: int) -> Flags:
+    out = Flags()
+    with get_engine().connect() as conn:
+        for uid, mark in conn.execute(select(filing_marks.c.uid, filing_marks.c.mark).where(filing_marks.c.user_id == user_id)):
+            out[uid] = mark
+        for uid in conn.execute(select(stars.c.uid).where(stars.c.user_id == user_id)).scalars():
+            out[uid] = "important"
+    return out
+
+
+def set_flag(user_id: int, uid: str, mark: str | None) -> None:
+    """One flag per filing: setting one clears the others; None clears all."""
+    with get_engine().begin() as conn:
+        conn.execute(delete(stars).where(stars.c.user_id == user_id, stars.c.uid == uid))
+        conn.execute(delete(filing_marks).where(filing_marks.c.user_id == user_id, filing_marks.c.uid == uid))
+        if mark == "important":
+            conn.execute(insert(stars).values(user_id=user_id, uid=uid, created_at=utcnow()))
+        elif mark in ("keep", "read_once"):
+            conn.execute(insert(filing_marks).values(user_id=user_id, uid=uid, mark=mark, marked_at=utcnow()))
 
 
 # ---- notes ------------------------------------------------------------------------------

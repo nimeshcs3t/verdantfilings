@@ -18,26 +18,19 @@ log = logging.getLogger(__name__)
 
 # market code -> (country, currency)
 MARKETS = {"US": ("USA", "USD"), "KR": ("South Korea", "KRW"), "JP": ("Japan", "JPY"), "HK": ("Hong Kong", "HKD"),
-           "AU": ("Australia", "AUD"), "IN": ("India", "INR"), "FR": ("France", "EUR"), "NL": ("Netherlands", "EUR"),
+           "AU": ("Australia", "AUD"), "FR": ("France", "EUR"), "NL": ("Netherlands", "EUR"),
            "IT": ("Italy", "EUR"), "NO": ("Norway", "NOK"), "BE": ("Belgium", "EUR"), "PT": ("Portugal", "EUR"),
-           "IE": ("Ireland", "EUR"), "ID": ("Indonesia", "IDR")}
+           "IE": ("Ireland", "EUR")}
 EURONEXT_CITY = {"paris": "FR", "amsterdam": "NL", "milan": "IT", "oslo": "NO", "brussels": "BE", "lisbon": "PT",
                  "dublin": "IE"}
 
 # name -> settings. date: order of day/month in dates ("mdy", "dmy", "ymd", "md"); window: the date column is a
 # subscription window rather than a listing date.
 SOURCES = {
+    # Kept to the cheap, reliable ones: one page each, no AI needed, not blocked from GitHub's servers.
     "Iposcoop": {"url": "https://www.iposcoop.com/ipo-calendar/", "market": "US", "date": "mdy"},
-    "Renaissance Capital": {"url": "https://www.renaissancecapital.com/IPO-Center", "market": "US", "date": "mdy"},
-    "StockAnalysis": {"url": "https://stockanalysis.com/ipos/calendar/", "market": "US", "date": "mdy"},
     "Euronext": {"url": "https://live.euronext.com/en/ipo-showcase", "market": "EURONEXT", "date": "dmy", "recent_days": 45},
     "AAStocks": {"url": "https://www.aastocks.com/en/stocks/market/ipo/upcomingipo/company-summary", "market": "HK", "date": "ymd"},
-    "IPO Watch": {"url": "https://ipowatch.in/upcoming-ipo-calendar-ipo-list/", "market": "IN", "date": "dmy", "window": True,
-                  "listing_after": 3},
-    "IPO Kiso": {"url": "https://www.ipokiso.com/", "market": "JP", "date": "md"},
-    "e-IPO": {"url": "https://e-ipo.co.id/en", "market": "ID", "mode": "ai"},
-    # Backup for India when IPO Watch refuses cloud servers: Gemini with Google Search lists current mainboard IPOs.
-    "India (web search)": {"url": None, "market": "IN", "mode": "search"},
 }
 
 # column name (lower case) -> field. First match wins, so specific names come before general ones.

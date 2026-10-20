@@ -27,7 +27,7 @@ def page() -> None:
     c4, c5 = st.columns([3, 1], vertical_alignment="center")
     cats = c4.pills("Categories", [label(k) for k in ORDER], selection_mode="multi", key="s-cats",
                     label_visibility="collapsed")
-    only_starred = c5.toggle("Starred only", key="s-starred")
+    only_starred = c5.toggle("Important & kept", key="s-starred")
     if len(text.strip()) >= 2:
         everywhere(user, text.strip())
 
@@ -35,8 +35,8 @@ def page() -> None:
     days = PERIODS[period]
     since = (get_source(market).today() if market else max(s.today() for s in configured_sources())) - timedelta(days=days) \
         if days else None
-    stars = personal.starred(user["id"])
-    rows = search(text, market, since, stars if only_starred else None)
+    stars = personal.flags(user["id"])
+    rows = search(text, market, since, {u for u, m in stars.items() if m in ("important", "keep")} if only_starred else None)
     if cats:
         rows = [r for r in rows if label(r["category"]) in cats]
 

@@ -136,6 +136,21 @@ filing_flags = Table(
     Column("price_sensitive", Boolean, nullable=False, default=False),
 )
 
+filing_marks = Table(
+    "filing_marks", metadata,               # a member's own flag on a filing: keep | read_once ("important" = stars)
+    Column("user_id", Integer, primary_key=True),
+    Column("uid", String(64), primary_key=True),
+    Column("mark", String(12), nullable=False),
+    Column("marked_at", DateTime(timezone=True), default=utcnow),
+    Index("ix_filing_marks_mark", "mark"),
+)
+
+deleted_filings = Table(
+    "deleted_filings", metadata,            # filings removed to save space; never downloaded again
+    Column("uid", String(64), primary_key=True),
+    Column("deleted_at", DateTime(timezone=True), default=utcnow),
+)
+
 stars = Table(
     "stars", metadata,
     Column("user_id", Integer, primary_key=True),
@@ -446,14 +461,6 @@ sent_once = Table(
     "sent_once", metadata,                  # alerts that must only go out once (insider clusters, new listings...)
     Column("key", String(120), primary_key=True),
     Column("created_at", DateTime(timezone=True), default=utcnow),
-)
-
-new_listings = Table(
-    "new_listings", metadata,
-    Column("market", String(8), primary_key=True),
-    Column("ticker", String(16), primary_key=True),
-    Column("name_en", String(200)),
-    Column("seen_on", Date),
 )
 
 ipos = Table(

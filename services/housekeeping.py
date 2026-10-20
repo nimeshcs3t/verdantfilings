@@ -24,7 +24,8 @@ def cleanup(force: bool = False) -> dict:
     now = utcnow()
     removed = {}
     with get_engine().begin() as conn:
-        starred = select(stars.c.uid)
+        from core.db import deleted_filings, filing_marks
+        starred = select(stars.c.uid).union(select(filing_marks.c.uid).where(filing_marks.c.mark == "keep"))
         removed["old filings"] = conn.execute(delete(filings).where(
             filings.c.filed_date < date.today() - timedelta(days=KEEP_FILINGS_DAYS), filings.c.uid.not_in(starred))).rowcount
         removed["long texts trimmed"] = conn.execute(update(filings).where(
@@ -39,6 +40,8 @@ def cleanup(force: bool = False) -> dict:
         removed["old security log"] = conn.execute(delete(security_events).where(security_events.c.ts < now - timedelta(days=365))).rowcount
         removed["used reset links"] = conn.execute(delete(password_resets).where(password_resets.c.expires_at < now - timedelta(days=1))).rowcount
         removed["expired share links"] = conn.execute(delete(share_links).where(share_links.c.expires_at < now)).rowcount
+        removed["old deletion records"] = conn.execute(delete(deleted_filings).where(
+            deleted_filings.c.deleted_at < now - timedelta(days=3 * 365))).rowcount
         removed["old sign-in attempts"] = conn.execute(delete(login_attempts).where(login_attempts.c.ts < now - timedelta(days=1))).rowcount
         removed["old usage counters"] = conn.execute(delete(api_usage).where(
             api_usage.c.day < (date.today() - timedelta(days=90)).isoformat())).rowcount

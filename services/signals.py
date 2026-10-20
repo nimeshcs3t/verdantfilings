@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 
-from core.db import get_engine, insider_tx, listed_companies, new_listings, sent_once, watchlist
+from core.db import get_engine, insider_tx, listed_companies, sent_once, watchlist
 
 log = logging.getLogger(__name__)
 BIG_BUY_USD = 1_000_000
@@ -61,37 +61,4 @@ def send_insider_alerts() -> int:
         for uid in users:
             if settings.get(uid).get("insider_alerts", True):
                 sent += deliver.send(uid, f"Insider buying: {name}", text)
-    return sent
-
-
-def record_new(market: str, old: set[str], new_rows: list[dict]) -> int:
-    """Called when a market's company list is refreshed: remember companies that weren't there before."""
-    if not old:
-        return 0      # first load of this market: everything is "new", so nothing is reported
-    fresh = [r for r in new_rows if r["ticker"] not in old]
-    with get_engine().begin() as conn:
-        for r in fresh[:200]:
-            try:
-                conn.execute(insert(new_listings).values(market=market, ticker=r["ticker"], name_en=r["name_en"],
-                                                         seen_on=date.today()))
-            except IntegrityError:
-                pass
-    return len(fresh)
-
-
-def send_new_listing_alerts() -> int:
-    from . import deliver, settings
-    from core.db import user_settings
-    with get_engine().connect() as conn:
-        fresh = [dict(r) for r in conn.execute(select(new_listings).where(new_listings.c.seen_on >= date.today() - timedelta(days=2))).mappings()]
-        members = [u for (u,) in conn.execute(select(user_settings.c.user_id).where(user_settings.c.key == "new_listing_markets"))]
-    if not fresh:
-        return 0
-    sent = 0
-    for uid in set(members):
-        markets = settings.get(uid).get("new_listing_markets") or []
-        items = [r for r in fresh if r["market"] in markets and once(f"nl:{uid}:{r['market']}:{r['ticker']}")]
-        if items:
-            lines = ["<b>New listings</b>"] + [f"• {r['name_en']}  {r['ticker']} ({r['market']})" for r in items[:30]]
-            sent += deliver.send(uid, "New listings", "\n".join(lines))
     return sent

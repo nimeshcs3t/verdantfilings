@@ -63,6 +63,10 @@ def css() -> str:
         vertical-align:2px; white-space:nowrap; }}
 {chips}
 .fl-flag.imp {{ color:var(--pine); border-color:var(--pine); }}
+.fl-mark {{ display:inline-block; font-size:.7rem; font-weight:600; border-radius:999px; padding:0 7px; margin-left:6px; vertical-align:1px; }}
+.fl-mark.keep {{ background:var(--pine); color:#fff; }} .fl-mark.once {{ border:1px dashed var(--muted); color:var(--muted); }}
+div[class*="st-key-flag-"] button {{ font-size:.74rem !important; min-height:0 !important; padding:1px 9px !important; }}
+div[class*="st-key-flag-"] {{ margin:-6px 0 2px; }}
 .cal-ev.est {{ background:transparent !important; border:1px dashed var(--muted); color:var(--muted); }}
 .heat {{ border:1px solid var(--rule); border-radius:8px; padding:4px; margin:4px 0 14px; }}
 .heat svg {{ width:100%; height:340px; display:block; }}
@@ -338,16 +342,21 @@ def summary_html(text: str) -> str:
 
 
 def filing_row_html(f: dict, show_company: bool = True, is_new: bool = False, country: str = "",
-                    category: str = "other", move: str = "", starred: bool = False, important: bool = False) -> str:
+                    category: str = "other", move: str = "", starred: bool = False, important: bool = False,
+                    mark: str | None = None) -> str:
     dot = '<span class="fl-new" title="Added in the last 2 hours"></span>' if is_new else ""
-    star = '<span class="fl-star" title="Starred">★</span>' if starred else ""
+    star = '<span class="fl-star" title="You marked this Important">★</span>' if starred else ""
     where = f'<span class="fl-tk">{esc(country)}</span>' if country else ""
     company = (f'<div class="fl-co">{dot}{star}{logo_html(f["company_name"], f["ticker"], market=f.get("market"))}{esc(f["company_name"])}'
                f'<span class="fl-tk">{esc(f["ticker"])}</span>{where}</div>' if show_company else "")
     lead = "" if show_company else dot + star
     flag = '<span class="fl-flag">Price sensitive</span>' if f.get("price_sensitive") else ""
     if important:
-        flag += '<span class="fl-flag imp">Important</span>'
+        flag += '<span class="fl-flag imp" title="Likely to matter, by type and size of the filing">High impact</span>'
+    if mark == "keep":
+        flag += '<span class="fl-mark keep" title="Kept: never deleted">Keep</span>'
+    elif mark == "read_once":
+        flag += '<span class="fl-mark once" title="Deleted when an admin frees up space">Read once</span>'
     orig = ""
     if f.get("title_local") and f["title_local"] != f.get("title_en"):
         orig = f'<div class="fl-orig ko">{esc(f["title_local"])}</div>'

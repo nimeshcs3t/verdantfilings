@@ -14,7 +14,7 @@ from sqlalchemy import and_, delete, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from core.config import direct_fetch, get_secret
-from core.db import (as_utc, companies, enrich_queue, filing_flags, filing_texts, filings, get_engine, listed_companies,
+from core.db import (as_utc, companies, deleted_filings, enrich_queue, filing_flags, filing_texts, filings, get_engine, listed_companies,
                      users, utcnow, watchlist)
 from sources import Company, SourceBusy, configured_sources, get_source
 
@@ -47,16 +47,9 @@ def refresh_listings(force: bool = False) -> int:
             continue
         if not rows:
             continue
-        with get_engine().connect() as conn:
-            old = {t for (t,) in conn.execute(select(listed_companies.c.ticker).where(listed_companies.c.market == src.market))}
         with get_engine().begin() as conn:
             conn.execute(delete(listed_companies).where(listed_companies.c.market == src.market))
             conn.execute(insert(listed_companies), rows)
-        try:
-            from .signals import record_new
-            record_new(src.market, old, rows)
-        except Exception as exc:
-            log.warning("new-listing check failed for %s: %s", src.market, exc)
         total += len(rows)
     return total
 
@@ -144,6 +137,7 @@ def sync_company(market: str, ticker: str, force: bool = False) -> int:
     if uids:
         with get_engine().connect() as conn:
             existing = set(conn.execute(select(filings.c.uid).where(filings.c.uid.in_(uids))).scalars())
+            existing |= set(conn.execute(select(deleted_filings.c.uid).where(deleted_filings.c.uid.in_(uids))).scalars())
     fresh = [f for f in found if f.uid not in existing]
     english = {f.uid: f.title_en or (f.title_local if looks_english(f.title_local) else None)
                or glossary_or_cached(f.title_local, src.source_lang) for f in fresh}
@@ -377,7 +371,7 @@ def run_once() -> dict:
                  ("financials", financials.refresh, 360), ("briefs", briefs.refresh, 360), ("logos", logos.refresh, 360),
                  ("fair_value", _fair_value_alerts, 30), ("journal", journal.send_reminders, 60),
                  ("report_notes", notes.refresh, 60), ("insider_alerts", signals.send_insider_alerts, 60),
-                 ("new_listings", signals.send_new_listing_alerts, 360), ("morning", digests.morning_briefs, 0),
+                 ("morning", digests.morning_briefs, 0),
                  ("monthly", digests.monthly_reports, 0), ("prices", _refresh_prices, 60)]
         # IPOs run in their own job (ipo_worker.py, workflow "IPO calendar"), so a slow run here can't skip them.
         for key, step, every in steps:

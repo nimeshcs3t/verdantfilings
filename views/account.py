@@ -177,11 +177,9 @@ def delivery_settings(user: dict) -> None:
     st.subheader("Signals", divider=False)
     from sources import visible_sources
     markets = {s.country: s.market for s in visible_sources(user)}
-    chosen = [c for c, m in markets.items() if m in (prefs.get("new_listing_markets") or [])]
     with st.form("signal-settings", border=False):
         insider = st.checkbox("Insider buying alerts: 2 or more insiders buying within 30 days, or a single US purchase "
                               "of $1M or more, for companies you follow", value=bool(prefs.get("insider_alerts", True)))
-        listing = st.multiselect("New listing alerts for these markets", list(markets), default=chosen)
         from services.ipos import COUNTRY, SECTORS
         c1, c2 = st.columns(2)
         ipo_c = c1.multiselect("New IPO alerts: countries", list(COUNTRY.values()),
@@ -189,13 +187,18 @@ def delivery_settings(user: dict) -> None:
         ipo_s = c2.multiselect("New IPO alerts: sectors (empty = all)", SECTORS,
                                default=[s for s in prefs.get("ipo_alert_sectors") or [] if s in SECTORS])
         if st.form_submit_button("Save signals"):
-            settings_svc.save(user["id"], insider_alerts=insider, new_listing_markets=[markets[c] for c in listing],
-                              ipo_alert_countries=ipo_c, ipo_alert_sectors=ipo_s)
+            settings_svc.save(user["id"], insider_alerts=insider, ipo_alert_countries=ipo_c, ipo_alert_sectors=ipo_s)
             st.success("Saved.")
 
 
 def data_section(user: dict) -> None:
     st.subheader("Your data", divider=False)
+    from services import storage
+    mine = storage.read_once_count(user["id"])
+    if mine:
+        st.caption(f"You've marked {mine:,} filing{'s' if mine != 1 else ''} Read once. "
+                   + ("Delete them on the Admin page, under Storage." if user["role"] == "admin" else
+                      "The admin deletes Read-once filings when space is needed."))
     st.caption("Download everything you've entered: watchlist, transactions, cash, journal, notes, stars, alerts, fair "
                "values, goals and settings, as JSON plus CSV files for spreadsheets.")
     if st.button("Prepare backup", icon=":material/download:"):

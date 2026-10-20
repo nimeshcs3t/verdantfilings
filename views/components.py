@@ -40,9 +40,16 @@ def render_filing(f: dict, key: str, show_company: bool = True, link_company: bo
     category = categorize(f.get("title_en"), f.get("title_local"), f.get("price_sensitive"))
     move = prices.move_html(prices.move_on(hist, f["filed_date"])) if hist else ""
     is_starred = bool(stars and f["uid"] in stars)
+    mark = stars.get(f["uid"]) if isinstance(stars, dict) else ("important" if is_starred else None)
     from services.importance import score as importance_score
     html_block(filing_row_html(f, show_company, is_new, country, category, move, is_starred,
-                               important=importance_score(f) >= 75))
+                               important=importance_score(f) >= 75, mark=mark))
+    user = st.session_state.get("user")
+    if user:
+        flag_key = f"flag-{key}-{f['uid']}"
+        st.pills("Flag", list(personal.MARK_LABELS), selection_mode="single", default=mark, key=flag_key,
+                 format_func=personal.MARK_LABELS.get, label_visibility="collapsed",
+                 on_change=_save_flag, args=(user["id"], f["uid"], flag_key))
     with st.expander("Overview and translation"):
         if f.get("summary_en"):
             _show_enriched(f)
@@ -61,15 +68,13 @@ def render_filing(f: dict, key: str, show_company: bool = True, link_company: bo
                 st.warning((enriched or {}).get("enrich_error", "This filing couldn't be processed."))
         else:
             st.caption("Translates the filing to English and writes a short overview.")
-        user = st.session_state.get("user")
-        cols = st.columns([1, 1, 3])
-        if user and cols[0].button("Unstar" if is_starred else "Star", key=f"star-{key}-{f['uid']}", type="tertiary",
-                                   icon=":material/star:" if is_starred else ":material/star_border:"):
-            personal.toggle_star(user["id"], f["uid"])
-            st.rerun()
         if show_company and link_company:
-            if cols[1].button("Company page", key=f"co-{key}-{f['uid']}", type="tertiary"):
+            if st.button("Company page", key=f"co-{key}-{f['uid']}", type="tertiary"):
                 nav.open_company(f["market"], f["ticker"])
+
+
+def _save_flag(user_id: int, uid: str, widget_key: str) -> None:
+    personal.set_flag(user_id, uid, st.session_state.get(widget_key))
 
 
 def _ask_box(f: dict, key: str) -> None:

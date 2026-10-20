@@ -7,6 +7,14 @@ import os
 
 os.environ.setdefault("DIRECT_FETCH", "true")
 
+import warnings  # noqa: E402
+
+try:  # harmless notice from reading DART's XML with the HTML parser
+    from bs4 import XMLParsedAsHTMLWarning
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+except ImportError:
+    pass
+
 from services.pipeline import run_once  # noqa: E402
 
 if __name__ == "__main__":

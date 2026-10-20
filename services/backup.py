@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from core import db
 
-TABLES = ["watchlist", "watch_prefs", "transactions", "cash_moves", "journal", "notes", "stars", "keywords", "price_alerts",
+TABLES = ["watchlist", "watch_prefs", "transactions", "cash_moves", "journal", "notes", "stars", "filing_marks", "keywords", "price_alerts",
           "fair_values", "targets", "goals", "user_prefs", "user_settings", "holdings"]
 CSV_TABLES = ["transactions", "cash_moves", "journal", "watchlist"]
 

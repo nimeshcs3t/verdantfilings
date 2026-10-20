@@ -75,6 +75,7 @@ def page() -> None:
     member_tools(me, rows)
     substack_check(me)
     security_panel()
+    storage_panel()
 
     st.subheader("Sync", divider=False)
     st.caption("The GitHub job checks every company every 10 minutes during Korean market hours and hourly "
@@ -292,3 +293,30 @@ def substack_check(me: dict) -> None:
             if f.get("posts"):
                 line += f", {f['posts']} recent posts read, {f['matching']} mention this company"
             (st.caption if f.get("posts") else st.warning)(line)
+
+
+def storage_panel() -> None:
+    """Database size, the biggest tables, and deleting filings marked Read once."""
+    from services import storage
+    st.subheader("Storage", divider=False)
+    info = storage.sizes()
+    if info["total_mb"] is not None:
+        used = info["total_mb"]
+        st.progress(min(used / storage.FREE_PLAN_MB, 1.0),
+                    text=f"Database: {used:,.0f} MB of {storage.FREE_PLAN_MB} MB (Supabase free plan)")
+        if used > storage.FREE_PLAN_MB * 0.8:
+            st.warning("Over 80% full. Delete Read-once filings below, or run Clean up now (Health).")
+    top = info["tables"][:10]
+    if top:
+        html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Table</th><th class="num">Size</th><th class="num">Rows</th></tr>'
+                   + "".join(f'<tr><td>{esc(n)}</td><td class="num">{"" if mb is None else f"{mb:,.1f} MB"}</td>'
+                             f'<td class="num">{rows:,}</td></tr>' for n, mb, rows in top) + "</table></div>")
+    n = storage.read_once_count()
+    c1, c2 = st.columns([3, 1.2], vertical_alignment="center")
+    c1.markdown(f"**{n:,} filing{'s' if n != 1 else ''} marked Read once** can be deleted. Filings anyone marked "
+                "Important or Keep are never deleted; deleted filings aren't downloaded again.")
+    with c2.popover("Delete read-once filings", disabled=not n, width="stretch"):
+        st.write(f"Delete {n:,} filings with their overviews and notes? This can't be undone.")
+        if st.button("Yes, delete them", type="primary", key="del-read-once"):
+            done = storage.delete_read_once()
+            st.success(f"Deleted {done:,} filings.")

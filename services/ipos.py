@@ -370,7 +370,8 @@ def refresh() -> dict:
             ipo_web.record_status(name, False, error=str(exc))
             report[name] = f"failed: {str(exc)[:120]}"
             log.warning("IPO website %s failed: %s", name, exc)
-    with get_engine().begin() as conn:      # tidy up: drop old entries
+    with get_engine().begin() as conn:      # tidy up: drop old entries and countries no longer covered
+        conn.execute(delete(ipos).where(ipos.c.market.not_in(list(COUNTRY))))
         conn.execute(delete(ipos).where(or_(and_(ipos.c.listing_date.is_not(None), ipos.c.listing_date < date.today() - timedelta(days=120)),
                                             and_(ipos.c.listing_date.is_(None), ipos.c.first_seen < date.today() - timedelta(days=240)))))
     return report
@@ -431,9 +432,23 @@ def _doc_text(item: dict) -> str:
         return ""
 
 
+def _ai_light(prompt: str) -> str | None:
+    """IPO extras use the lightest Gemini model, then Claude if a key is set."""
+    from .summarize import _anthropic, gemini_request
+    try:
+        data = gemini_request({"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2}}, light=True)
+        if data:
+            return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+    except Exception:
+        pass
+    try:
+        return _anthropic(prompt)
+    except Exception:
+        return None
+
+
 def _ai(prompt: str) -> dict | None:
-    from .summarize import providers
-    for provider in providers():
+    for provider in (_ai_light,):
         try:
             reply = provider(prompt)
         except Exception:
@@ -448,8 +463,7 @@ def _ai(prompt: str) -> dict | None:
 
 
 def _ai_list(prompt: str) -> list[dict] | None:
-    from .summarize import providers
-    for provider in providers():
+    for provider in (_ai_light,):
         try:
             reply = provider(prompt)
         except Exception:
@@ -484,6 +498,9 @@ def _gemini_search(prompt: str) -> dict | None:
             return None
         text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
     except Exception as exc:
+        from .summarize import GeminiBusy
+        if isinstance(exc, GeminiBusy):
+            raise
         log.info("Gemini search failed: %s", exc)
         return None
     m = re.search(r"\{.*\}", text, re.S)
@@ -513,6 +530,33 @@ def _web_text(item: dict) -> tuple[str, str | None]:
     return "\n\n".join(pieces), website
 
 
+def _site_brief(url: str | None) -> str | None:
+    """The company website's own one-line description (meta description), cut to two sentences. No AI."""
+    if not url or not url.startswith("http"):
+        return None
+    try:
+        from .ipo_web import clean, fetch_html
+        soup = BeautifulSoup(fetch_html("company websites", url), "html.parser")
+    except Exception:
+        return None
+    for attrs in ({"name": "description"}, {"property": "og:description"}, {"name": "twitter:description"}):
+        tag = soup.find("meta", attrs=attrs)
+        text = clean(tag.get("content")) if tag else ""
+        if len(text) >= 40 and not re.search(r"cookie|javascript|log ?in|sign ?up", text, re.I):
+            sentences = re.split(r"(?<=[.!?])\s+", text)
+            return " ".join(sentences[:2])[:300]
+    return None
+
+
+def _ai_budget_left() -> int:
+    from core.usage import counts_today
+    try:
+        used = counts_today().get("ipo-ai", 0)
+    except Exception:
+        used = 0
+    return max(0, int(get_secret("IPO_AI_PER_DAY", "10") or 10) - used)
+
+
 def enrich(limit: int = 25) -> int:
     """IPO job: a two-line brief, sector and market cap for each new IPO. Reads, in order: the official document,
     the company pages of the websites that list it, then (Gemini only) a Google search. Leaves the brief empty
@@ -534,33 +578,48 @@ def enrich(limit: int = 25) -> int:
         return d.get("brief_tries", 0) < 3 and (not last or last < (today - timedelta(days=1)).isoformat())
     rows = (fresh + [r for r in retry if due(r)])[:limit]
     has_ai = bool(get_secret("GEMINI_API_KEY") or get_secret("ANTHROPIC_API_KEY"))
+    from .summarize import GeminiBusy, gemini_cooling
     done = 0
     for item in rows:
         values: dict = {"ai_done": True}
         details = _jload(item.get("details"))
-        text, src = _doc_text(item), "document"
+        use_ai = has_ai and _ai_budget_left() > 0 and not gemini_cooling()
+        text, src = (_doc_text(item), "document") if use_ai else ("", "document")   # documents are only useful to AI
         website = None
         if not text:
-            text, website = _web_text(item)
+            text, website = _web_text(item)          # the listing site's company page (also gives the website)
             src = "page"
         if website and not item.get("website"):
             values["website"] = website[:300]
         if item.get("sec_industry"):
             values["sector"] = guess_sector(item["sec_industry"]) if guess_sector(item["sec_industry"]) != "Other" else None
         got = None
-        if has_ai and text:
+        if use_ai and text:
+            from core.usage import count
+            count("ipo-ai")
             known = {k: item.get(k) for k in ("ticker", "exchange", "listing_date", "price_low", "price_high", "raise_amount")}
             got = _ai(PROMPT.format(sectors=json.dumps(SECTORS), name=item["name"], country=item.get("country"),
-                                    known=json.dumps(known, default=str), text=text[:24000]))
+                                    known=json.dumps(known, default=str), text=text[:12000]))
             time.sleep(4)                                   # stay under the free Gemini per-minute limit
-        if not (got and got.get("overview")) and get_secret("GEMINI_API_KEY"):
-            searched = _gemini_search(SEARCH_PROMPT.format(
-                name=item["name"], country=item.get("country"), exchange=item.get("exchange") or "", ticker=item.get("ticker") or "-",
-                sectors=json.dumps(SECTORS), extra=f"Industry: {details['industry']}" if details.get("industry") else ""))
+        web_search = str(get_secret("IPO_WEB_SEARCH", "false")).lower() in {"1", "true", "yes"}
+        if not (got and got.get("overview")) and web_search and use_ai and _ai_budget_left() > 0 and get_secret("GEMINI_API_KEY"):
+            from core.usage import count
+            count("ipo-ai")
+            try:
+                searched = _gemini_search(SEARCH_PROMPT.format(
+                    name=item["name"], country=item.get("country"), exchange=item.get("exchange") or "", ticker=item.get("ticker") or "-",
+                    sectors=json.dumps(SECTORS), extra=f"Industry: {details['industry']}" if details.get("industry") else ""))
+            except GeminiBusy:
+                searched = None
             time.sleep(4)
             if searched and searched.get("overview"):
                 got = {**(got or {}), **{k: v for k, v in searched.items() if v}}
                 src = "search"
+        if not (got and got.get("overview")):                 # no AI (or nothing found): the company's own website
+            site = _site_brief(values.get("website") or item.get("website"))
+            if site:
+                got = {**(got or {}), "overview": site}
+                src = "website"
         if got:
             if got.get("sector") in SECTORS and not values.get("sector"):
                 values["sector"] = got["sector"]
@@ -578,13 +637,15 @@ def enrich(limit: int = 25) -> int:
             for k in ("price_low", "price_high"):
                 if not item.get(k) and _num(got.get(k)):
                     values[k] = _num(got[k])
-        if not values.get("overview"):
+        if not values.get("overview") and use_ai:      # without AI this run (limit or daily cap), it isn't a real try
             details.update(brief_tries=details.get("brief_tries", 0) + 1, brief_last=today.isoformat())
             values["details"] = json.dumps(details, default=str)
+        elif not values.get("overview"):
+            values["ai_done"] = item.get("ai_done", False)
         if not values.get("sector") and not item.get("sector"):
             hint = f"{details.get('industry') or ''} {item['name']} {values.get('overview') or item.get('overview') or ''}"
             values["sector"] = guess_sector(hint)
-        if item["market"] == "KR" and "name" not in values and not has_ai:
+        if item["market"] == "KR" and "name" not in values and not use_ai:
             try:
                 from .translate import translate_title
                 values["name"] = translate_title(item["name"], "ko") or item["name"]

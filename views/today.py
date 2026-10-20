@@ -101,7 +101,7 @@ def page() -> None:
             html_block('<div class="empty">Nothing filed in this period. Filings usually arrive during '
                        'local business hours. Try a longer period above.</div>')
 
-        stars = personal.starred(user["id"])
+        stars = personal.flags(user["id"])
         hist = histories([(r["market"], r["ticker"]) for r in rows])
         label_country = len(markets) > 1 and choice == "All"
         if (st.session_state.get("today-view") or "By time") == "By company":

@@ -187,7 +187,7 @@ def page() -> None:
             st.caption("This company's filings are being loaded for the first time. They'll appear within a few minutes.")
         else:
             st.caption(f"{len(rows)} filings in the last 180 days")
-        stars = personal.starred(user["id"])
+        stars = personal.flags(user["id"])
         for r in rows:
             render_filing(r, key="co", show_company=False, hist=hist, stars=stars)
         if src.attribution and rows:

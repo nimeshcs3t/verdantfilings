@@ -184,15 +184,23 @@ def cached_local_news(market: str, name_local: str, limit: int = 10) -> list[dic
 
 
 @st.cache_data(ttl=10800, show_spinner=False)
-def cached_substack(name_en: str, ticker: str, newsletters: tuple = ()) -> list[dict]:
+def cached_substack(name_en: str, ticker: str, newsletters: tuple = ()) -> dict:
     from services import substack
-    return substack.posts_for(name_en, ticker, list(newsletters))
+    return substack.lookup(name_en, ticker, list(newsletters))
 
 
-def render_substack(posts: list[dict]) -> None:
+def render_substack(result) -> None:
+    posts = result["posts"] if isinstance(result, dict) else result
     if not posts:
-        html_block('<div class="empty">No recent Substack posts found about this company. Add newsletters you read '
-                   'under Account, then Substack, to include their posts.</div>')
+        if isinstance(result, dict) and not result.get("search_reached"):
+            msg = ("Substack's search couldn't be reached from the app's server"
+                   + (f" ({esc(result['search_error'])})" if result.get("search_error") else "") + ". ")
+            msg += ("Your followed newsletters had no posts about this company." if result.get("followed") else
+                    "Add newsletters you read under Account, then Substack: those are read directly and still work.")
+        else:
+            msg = ("No Substack posts about this company in the last 3 months. Add newsletters you read under "
+                   "Account, then Substack, to include their posts.")
+        html_block(f'<div class="empty">{msg}</div>')
         return
     rows = []
     for p in posts:

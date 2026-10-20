@@ -206,6 +206,12 @@ def css() -> str:
 .ipo-facts {{ display:flex; flex-wrap:wrap; gap:6px 18px; margin:6px 0 4px; font-size:.86rem; color:var(--ink); }}
 .ipo-facts b {{ color:var(--muted); font-weight:500; margin-right:4px; }}
 .ipo-ov {{ font-size:.9rem; line-height:1.5; color:var(--body-en); margin:4px 0; }}
+.ss-post {{ border-top:1px solid var(--rule); padding:10px 0; }}
+.ss-post a {{ font-weight:600; color:var(--ink); text-decoration:none; }} .ss-post a:hover {{ color:var(--pine); text-decoration:underline; }}
+.ss-sum {{ font-size:.88rem; color:var(--body-en); margin:3px 0; line-height:1.45; }}
+.ss-meta {{ font-size:.78rem; color:var(--muted); }}
+.ss-tag {{ font-size:.68rem; font-weight:600; border:1px solid var(--rule); border-radius:999px; padding:1px 7px; margin-left:8px; vertical-align:2px; color:var(--muted); }}
+.ss-tag.mine {{ color:var(--pine); border-color:var(--pine); }} .ss-tag.paid {{ color:var(--amber); border-color:var(--amber); }}
 .ipo-brief {{ font-size:.92rem; line-height:1.5; color:var(--body-en); margin:6px 0 4px; max-width:860px; }}
 .ipo-brief.none {{ color:var(--muted); font-size:.82rem; font-style:italic; }}
 .ipo-src {{ color:var(--muted); font-size:.74rem; }}

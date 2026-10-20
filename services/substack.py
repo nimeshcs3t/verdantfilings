@@ -88,8 +88,9 @@ def _publication(post: dict) -> str:
     return m.group(1) if m else ""
 
 
-def search(name: str, ticker: str, days: int = 90, limit: int = 12) -> list[dict]:
-    """Substack's site search for the company name (and the ticker when it's distinctive)."""
+def search(name: str, ticker: str, days: int = 90, limit: int = 12, report: list | None = None) -> list[dict]:
+    """Substack's site search for the company name (and the ticker when it's distinctive). If `report` is a list, one
+    entry per query is added to it: what Substack answered and what was kept, for the Admin check."""
     is_about = matcher(name, ticker)
     queries = [short_name(name)] + ([f"${ticker}"] if _ticker_ok(ticker) else [])
     since = datetime.now(timezone.utc) - timedelta(days=days)
@@ -97,24 +98,39 @@ def search(name: str, ticker: str, days: int = 90, limit: int = 12) -> list[dict
     for q in queries:
         if not q or len(q) < 2:
             continue
+        entry = {"query": q, "status": None, "returned": 0, "kept": 0, "too_old": 0, "off_topic": []}
         try:
             r = requests.get(f"https://substack.com/api/v1/top/search?query={quote_plus(q)}&page=0", headers=HEADERS, timeout=15)
+            entry["status"] = r.status_code
             r.raise_for_status()
             found: list = []
             _walk_posts(r.json(), found)
         except Exception as exc:
+            entry["error"] = str(exc)[:160]
             log.info("Substack search failed for %s: %s", q, exc)
+            if report is not None:
+                report.append(entry)
             continue
+        entry["returned"] = len(found)
         for p in found:
             url = p["canonical_url"]
             when = _when(p.get("post_date"))
             text = f"{p.get('title') or ''} {p.get('subtitle') or ''} {p.get('description') or ''} {p.get('truncated_body_text') or ''}"
-            if url in seen or (when and when < since) or not is_about(text):
+            if url in seen:
+                continue
+            if when and when < since:
+                entry["too_old"] += 1
+                continue
+            if not is_about(text):
+                entry["off_topic"].append(p.get("title") or "")
                 continue
             seen.add(url)
+            entry["kept"] += 1
             posts.append({"title": p["title"].strip(), "summary": (p.get("subtitle") or p.get("description") or "").strip()[:240],
                           "link": url, "source": _publication(p), "published": when,
                           "paid": p.get("audience") in ("only_paid", "founding"), "from": "search"})
+        if report is not None:
+            report.append(entry)
     return sorted(posts, key=lambda p: p["published"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:limit]
 
 
@@ -185,6 +201,35 @@ def from_feeds(newsletters: list[str], name: str, ticker: str, days: int = 120, 
 
 def posts_for(name: str, ticker: str, newsletters: list[str] | None = None) -> list[dict]:
     """Followed newsletters first, then Substack-wide search, without duplicates."""
+    return lookup(name, ticker, newsletters)["posts"]
+
+
+def lookup(name: str, ticker: str, newsletters: list[str] | None = None) -> dict:
+    """Posts plus whether Substack's search could be reached, so the page can say why it's empty."""
     mine = from_feeds(newsletters or [], name, ticker) if newsletters else []
     links = {p["link"] for p in mine}
-    return mine + [p for p in search(name, ticker) if p["link"] not in links]
+    report: list = []
+    found = search(name, ticker, report=report)
+    reached = any(e.get("status") == 200 for e in report)
+    return {"posts": mine + [p for p in found if p["link"] not in links], "search_reached": reached,
+            "search_error": next((e.get("error") or f"status {e.get('status')}" for e in report if e.get("status") != 200), None),
+            "followed": len(newsletters or [])}
+
+
+def diagnose(name: str, ticker: str, newsletters: list[str] | None = None) -> dict:
+    """Everything the Admin 'Substack check' shows: per search query and per followed newsletter."""
+    report: list = []
+    search(name, ticker, report=report)
+    feeds = []
+    for n in (newsletters or [])[:30]:
+        url = feed_url(n)
+        if not url:
+            feeds.append({"newsletter": n, "url": None, "status": "not a valid newsletter name", "posts": 0, "matching": 0})
+            continue
+        _feed_cache.pop(url, None)
+        title, entries = _feed(url)
+        is_about = matcher(name, ticker)
+        feeds.append({"newsletter": n, "url": url, "status": "ok" if entries else "no posts read (check the name)",
+                      "title": title, "posts": len(entries),
+                      "matching": sum(1 for e in entries if is_about(f"{e['title']} {e['summary']} {e['body']}"))})
+    return {"short_name": short_name(name), "ticker_used": _ticker_ok(ticker), "search": report, "feeds": feeds}

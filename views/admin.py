@@ -73,6 +73,7 @@ def page() -> None:
             st.error(err) if err else st.success(f"Added {username.lower()}.")
 
     member_tools(me, rows)
+    substack_check(me)
     security_panel()
 
     st.subheader("Sync", divider=False)
@@ -185,7 +186,7 @@ def sources_panel() -> None:
         st.warning("Needs a look: " + ", ".join(r["country"] for r in problems) + ". Paused sources resume by themselves; "
                    "a market 'not updating' for a day may mean its website changed.")
     ipo_rows = status.ipo_sources()
-    with st.expander("IPO sources (job runs every 4 hours)"):
+    with st.expander("IPO sources (job runs twice a day)"):
         html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Source</th><th>Covers</th><th>State</th>'
                    '<th class="num">IPOs read</th><th>Last success</th><th>Last error</th></tr>' + "".join(
                        f'<tr><td>{esc(r["source"])}</td><td>{esc(r["country"])}</td>'
@@ -259,3 +260,35 @@ def security_panel() -> None:
                        f'<td>{esc(LABELS.get(r["kind"], r["kind"]))}{(" · " + esc(r["detail"])) if r.get("detail") else ""}</td>'
                        f'<td>{esc(r.get("device") or "")}</td><td>{esc(r.get("ip") or "")}</td></tr>' for r in recent)
                    + "</table></div>")
+
+
+def substack_check(me: dict) -> None:
+    """Shows what Substack returns for a company, from this server, and what the matching keeps."""
+    from services import settings as settings_svc, substack
+    with st.expander("Substack check"):
+        st.caption("Runs the same lookup as a company's News tab (Substack) from this server, with the details.")
+        c1, c2, c3 = st.columns([2, 1, 1], vertical_alignment="bottom")
+        name = c1.text_input("Company name", value="NVIDIA Corporation", key="ss-name")
+        ticker = c2.text_input("Ticker", value="NVDA", key="ss-ticker")
+        if not c3.button("Run check", key="ss-run", width="stretch"):
+            return
+        with st.spinner("Asking Substack"):
+            d = substack.diagnose(name, ticker.strip().upper(), settings_svc.get(me["id"]).get("substack_feeds") or [])
+        st.write(f"Searching for **{esc(d['short_name'])}**" + (f" and **${esc(ticker.upper())}**" if d["ticker_used"] else
+                 " (ticker not used: too short or numeric)"))
+        for e in d["search"]:
+            if e.get("status") != 200:
+                st.error(f"Search '{e['query']}': Substack didn't answer normally ({e.get('error') or e.get('status')}). "
+                         "It may be blocking this server; followed newsletters still work.")
+                continue
+            st.success(f"Search '{e['query']}': Substack returned {e['returned']} posts; kept {e['kept']} about this company, "
+                       f"{e['too_old']} older than 3 months, {len(e['off_topic'])} not about it.")
+            if e["off_topic"]:
+                st.caption("Not about it: " + " · ".join(t[:70] for t in e["off_topic"][:5]))
+        if not d["feeds"]:
+            st.caption("You follow no newsletters yet (Account, then Substack).")
+        for f in d["feeds"]:
+            line = f"{f['newsletter']}: {f['status']}"
+            if f.get("posts"):
+                line += f", {f['posts']} recent posts read, {f['matching']} mention this company"
+            (st.caption if f.get("posts") else st.warning)(line)

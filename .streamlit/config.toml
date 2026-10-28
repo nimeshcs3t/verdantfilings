@@ -18,6 +18,7 @@
    showSidebarNavigation = false
 
    [server]
+   enableStaticServing = true
    enableXsrfProtection = true
    fileWatcherType = "none"
 

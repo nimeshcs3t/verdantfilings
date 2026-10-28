@@ -464,6 +464,64 @@ sent_once = Table(
     Column("created_at", DateTime(timezone=True), default=utcnow),
 )
 
+market_events = Table(
+    "market_events", metadata,              # market-wide announcements of chosen types, for the screener (30 days)
+    Column("uid", String(64), primary_key=True),
+    Column("market", String(8), nullable=False),
+    Column("ticker", String(16)),
+    Column("company", String(200)),
+    Column("filed_date", Date, nullable=False),
+    Column("category", String(16), nullable=False),
+    Column("title_local", Text),
+    Column("title_en", Text),
+    Column("url", Text),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+    Index("ix_market_events", "category", "filed_date"),
+)
+
+us_stocks = Table(
+    "us_stocks", metadata,                  # every US-listed stock: Nasdaq screener prices + SEC XBRL key figures
+    Column("ticker", String(16), primary_key=True),
+    Column("cik", String(12)),
+    Column("name", String(200)),
+    Column("sector", String(80)),
+    Column("industry", String(120)),
+    Column("country", String(60)),
+    Column("price", Float),
+    Column("change_pct", Float),
+    Column("market_cap", Float),
+    Column("revenue", Float),               # latest fiscal year (calendar-aligned frame)
+    Column("revenue_prev", Float),
+    Column("net_income", Float),
+    Column("op_income", Float),
+    Column("equity", Float),
+    Column("rev_q", Float),                 # latest quarter and the same quarter a year earlier
+    Column("rev_q_prev", Float),
+    Column("fiscal_year", Integer),
+    Column("quarter", String(8)),
+    Column("prices_at", DateTime(timezone=True)),
+    Column("figures_at", DateTime(timezone=True)),
+    Index("ix_us_stocks_industry", "industry"),
+)
+
+company_peers = Table(
+    "company_peers", metadata,              # a member's chosen peers for a company
+    Column("user_id", Integer, primary_key=True),
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("peer_market", String(8), primary_key=True),
+    Column("peer_ticker", String(16), primary_key=True),
+    Column("added_at", DateTime(timezone=True), default=utcnow),
+)
+
+filing_mentions = Table(
+    "filing_mentions", metadata,            # a filing that names another followed company (supply chain, deals)
+    Column("uid", String(64), primary_key=True),
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Column("found_at", DateTime(timezone=True), default=utcnow),
+)
+
 ipos = Table(
     "ipos", metadata,                       # IPOs from several markets (Nasdaq/SEC, DART, JPX, HKEX, ASX)
     Column("uid", String(80), primary_key=True),

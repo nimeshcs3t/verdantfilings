@@ -11,7 +11,7 @@ from core.auth import ensure_admin  # noqa: E402
 from core.db import get_engine  # noqa: E402
 from core.session import apply_cookie_changes, current_user  # noqa: E402
 from core.ui import inject_css  # noqa: E402
-from views import account, admin, calendar, company, compare, ipos, journal, portfolio, search, signin, today, watchlist  # noqa: E402
+from views import account, admin, calendar, company, compare, ipos, journal, portfolio, screener, search, signin, today, watchlist  # noqa: E402
 
 
 @st.cache_resource(show_spinner=False)
@@ -23,6 +23,8 @@ def bootstrap() -> bool:
 
 bootstrap()
 inject_css()
+from core import pwa  # noqa: E402
+pwa.inject()
 try:
     st.logo("assets/logo.svg", size="large")
 except Exception:
@@ -68,6 +70,7 @@ pages = {
     "watchlist": st.Page(watchlist.page, title="Watchlist", url_path="watchlist"),
     "portfolio": st.Page(portfolio.page, title="Portfolio", url_path="portfolio"),
     "calendar": st.Page(calendar.page, title="Calendar", url_path="calendar"),
+    "screener": st.Page(screener.page, title="Screener", url_path="screener"),
     "ipos": st.Page(ipos.page, title="IPOs", url_path="ipos"),
     "compare": st.Page(compare.page, title="Compare", url_path="compare"),
     "journal": st.Page(journal.page, title="Journal", url_path="journal"),

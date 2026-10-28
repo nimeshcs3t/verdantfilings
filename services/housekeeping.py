@@ -43,6 +43,10 @@ def cleanup(force: bool = False) -> dict:
         removed["old security log"] = conn.execute(delete(security_events).where(security_events.c.ts < now - timedelta(days=365))).rowcount
         removed["used reset links"] = conn.execute(delete(password_resets).where(password_resets.c.expires_at < now - timedelta(days=1))).rowcount
         removed["expired share links"] = conn.execute(delete(share_links).where(share_links.c.expires_at < now)).rowcount
+        from core.db import filing_mentions
+        from core.db import market_events
+        removed["old mention links"] = conn.execute(delete(filing_mentions).where(
+            filing_mentions.c.uid.not_in(select(filings.c.uid)), filing_mentions.c.uid.not_in(select(market_events.c.uid)))).rowcount
         removed["old deletion records"] = conn.execute(delete(deleted_filings).where(
             deleted_filings.c.deleted_at < now - timedelta(days=3 * 365))).rowcount
         removed["old sign-in attempts"] = conn.execute(delete(login_attempts).where(login_attempts.c.ts < now - timedelta(days=1))).rowcount

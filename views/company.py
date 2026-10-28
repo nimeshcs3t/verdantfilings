@@ -163,7 +163,11 @@ def page() -> None:
                 personal.save_note(user["id"], market, comp["ticker"], body)
                 st.toast("Notes saved")
 
-    tab_filings, tab_fin, tab_ins, tab_news, tab_chat = st.tabs(["Filings", "Financials", "Insiders", "News", "Discussion"])
+    tab_filings, tab_fin, tab_ins, tab_news, tab_peers, tab_chat = st.tabs(["Filings", "Financials", "Insiders", "News",
+                                                                            "Peers", "Discussion"])
+
+    with tab_peers:
+        peers_tab(user, market, comp)
 
     with tab_fin:
         financials_tab(market, comp["ticker"])
@@ -331,3 +335,85 @@ def insiders_tab(market: str, ticker: str, filings_rows: list[dict]) -> None:
         st.caption("No insider trades found yet. They load within a day of adding a company to a watchlist.")
     else:
         st.caption("No insider or ownership filings in the last 180 days.")
+
+
+def peers_tab(user: dict, market: str, comp: dict) -> None:
+    """Peers side by side, their latest filings, and filings that link this company with others."""
+    import pandas as pd
+    from services import connections
+    ticker = comp["ticker"]
+    my_peers = connections.peers(user["id"], market, ticker)
+    with st.spinner("Comparing"):
+        rows = connections.peer_table(user["id"], market, ticker)
+    pct = lambda v: None if v is None else round(v * 100, 1)
+    if my_peers:
+        df = pd.DataFrame([{"Company": ("▸ " if r["self"] else "") + r["name"], "Ticker": r["ticker"], "Country": r["country"],
+                            "Price": r["price"], "Currency": r["currency"], "1-year %": pct(r["ret1y"]),
+                            "P/E": r["pe"], "P/S": r["ps"], "Growth %": pct(r["growth"]),
+                            "Op. margin %": pct(r["op_margin"]), "Net margin %": pct(r["net_margin"])} for r in rows])
+        for col in ("Price", "1-year %", "P/E", "P/S", "Growth %", "Op. margin %", "Net margin %"):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        st.dataframe(df, hide_index=True, width="stretch", column_config={
+            "Price": st.column_config.NumberColumn(format="%.2f"),
+            "P/E": st.column_config.NumberColumn(format="%.1f"), "P/S": st.column_config.NumberColumn(format="%.1f"),
+            **{c: st.column_config.NumberColumn(format="%+.1f") for c in ("1-year %", "Growth %", "Op. margin %", "Net margin %")}})
+        st.caption("Each in its own currency, latest reported year. Peers' filings are collected like any company you look up.")
+    else:
+        st.caption("No peers yet. Add competitors, suppliers or customers to compare them and see their filings here.")
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        q = st.text_input("Add a peer", placeholder="Name or ticker, any country", key=f"peer-q-{ticker}")
+        if q.strip() and len(q.strip()) >= 2:
+            from views.search import _company_hits
+            from sources import visible_sources
+            hits = _company_hits(q.strip(), tuple(sorted(s.market for s in visible_sources(user))))
+            for m, t, name, country in hits[:8]:
+                if st.button(f"{name} ({t}, {country})", key=f"peer-add-{m}-{t}", type="tertiary", icon=":material/add:"):
+                    err = connections.add_peer(user["id"], market, ticker, m, t)
+                    st.warning(err) if err else st.rerun()
+            if not hits:
+                st.caption("No match among listed companies.")
+    with c2:
+        sugg = [s for s in connections.suggestions(market, ticker) if ("US", s["ticker"]) not in my_peers]
+        if sugg:
+            st.caption("Suggested (same industry, similar size)")
+            for s_ in sugg:
+                if st.button(f"{s_['name']} ({s_['ticker']})", key=f"peer-sug-{s_['ticker']}", type="tertiary", icon=":material/add:"):
+                    err = connections.add_peer(user["id"], market, ticker, "US", s_["ticker"])
+                    st.warning(err) if err else st.rerun()
+    if my_peers:
+        with st.expander("Remove peers"):
+            for m, t in my_peers:
+                if st.button(f"Remove {t}", key=f"peer-rm-{m}-{t}", type="tertiary"):
+                    connections.remove_peer(user["id"], market, ticker, m, t)
+                    st.rerun()
+        st.subheader("Peers' latest filings", divider=False)
+        pf = connections.peer_filings(user["id"], market, ticker)
+        flags = personal.flags(user["id"])
+        for f in pf:
+            render_filing(f, key="peerf", stars=flags)
+        if not pf:
+            st.caption("No peer filings stored yet; they arrive with the next background run.")
+
+    named_in = connections.mentions_of(market, ticker)
+    named_market = connections.market_mentions_of(market, ticker)
+    names_others = connections.mentioned_by(market, ticker)
+    if named_in or names_others or named_market:
+        st.subheader("Connections in filings", divider=False)
+    if named_in:
+        st.caption(f"Other companies' filings that name {comp['name_en']} (contracts, supply, deals)")
+        flags = personal.flags(user["id"])
+        for f in named_in[:15]:
+            render_filing(f, key="named", stars=flags)
+    if named_market:
+        st.caption(f"Announcements from other companies on the market that name {comp['name_en']} (last 30 days)")
+        from sources import get_source
+        html_block("".join(
+            f'<div class="ev-row"><b>{r["filed_date"]:%d %b}</b>{esc(r["company"] or r["ticker"] or "")}: '
+            f'{esc(r["title_en"] or r["title_local"])} <span>{esc((get_source(r["market"]) or type("x", (), {"country": r["market"]})).country)} · '
+            f'<a href="{esc(r["url"])}" target="_blank" rel="noopener noreferrer">Original</a></span></div>' for r in named_market[:15]))
+    if names_others:
+        st.caption(f"{comp['name_en']}'s filings that name other companies you follow")
+        html_block("".join(f'<div class="ev-row"><b>{r["filed_date"]:%d %b}</b>{esc(r["title_en"])} '
+                           f'<span>names {esc(r["m_name"] or r["m_ticker"])}</span></div>' for r in names_others[:15]))

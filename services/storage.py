@@ -11,7 +11,9 @@ from core.db import (deleted_filings, enrich_queue, events, events_scanned, fili
                      filing_texts, filings, get_engine, keyword_hits, metadata, stars, utcnow)
 
 FREE_PLAN_MB = 500          # Supabase free plan database limit
-RELATED = [filing_notes, filing_texts, filing_flags, enrich_queue, events, events_scanned, keyword_hits, filing_marks]
+from core.db import filing_mentions  # noqa: E402
+RELATED = [filing_notes, filing_texts, filing_flags, enrich_queue, events, events_scanned, keyword_hits, filing_marks,
+           filing_mentions]
 
 
 def _deletable(conn) -> list[str]:

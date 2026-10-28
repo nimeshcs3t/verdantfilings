@@ -29,6 +29,19 @@ if __name__ == "__main__":
     logging.info("briefs written: %s", briefs)
     alerts = ipos.send_alerts()
     logging.info("alerts sent: %s", alerts)
+    # US screener data rides along with this job: prices twice a day, SEC figures weekly.
+    from services import us_screener
+    from services.pipeline import _due
+    try:
+        logging.info("US stocks: %s prices", us_screener.refresh_prices())
+    except Exception as exc:
+        logging.warning("US screener prices failed: %s", exc)
+    if _due("job:us_figures", 7 * 24 * 60):
+        try:
+            logging.info("US stocks figures: %s", us_screener.refresh_figures())
+        except Exception as exc:
+            logging.warning("US screener figures failed: %s", exc)
+            set_state("job:us_figures", "")
     total = len(ipos.listing())
     logging.info("IPOs stored: %s; run took %.0f s", total, time.time() - started)
     set_state("ipo_job_last", json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "stored": total,

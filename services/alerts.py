@@ -130,7 +130,8 @@ def _candidates() -> list[dict]:
                                "title_en": r["title_en"] or "", "url": r["url"], "date": r["filed_date"]}
     for src in configured_sources():
         try:
-            feed = src.market_feed()
+            from .screener import market_feed
+            feed = market_feed(src)          # shared with the announcement screener
         except Exception as exc:
             log.warning("market feed failed for %s: %s", src.market, exc)
             continue

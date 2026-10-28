@@ -172,8 +172,8 @@ def _mymemory(text: str, src: str) -> str | None:
     return None
 
 
-def _machine(text: str, src: str) -> str | None:
-    for translator in (_google, _llm, _mymemory):
+def _machine(text: str, src: str, allow_ai: bool = True) -> str | None:
+    for translator in ((_google, _llm, _mymemory) if allow_ai else (_google, _mymemory)):
         result = translator(text, src)
         if result and result.strip() and result.strip() != text.strip():
             return result
@@ -241,7 +241,7 @@ def translate_title(title: str, src: str = "ko") -> str:
     return title
 
 
-def translate_lines(lines: list[str], src: str) -> list[str]:
+def translate_lines(lines: list[str], src: str, allow_ai: bool = True) -> list[str]:
     """Translate short lines (headlines) with caching; one request for all uncached lines."""
     results: list[str | None] = []
     missing = []
@@ -251,10 +251,10 @@ def translate_lines(lines: list[str], src: str) -> list[str]:
         if cached is None:
             missing.append(i)
     if missing:
-        joined = _machine("\n".join(lines[i] for i in missing), src) if len(missing) > 1 else None
+        joined = _machine("\n".join(lines[i] for i in missing), src, allow_ai) if len(missing) > 1 else None
         parts = [p for p in joined.split("\n") if p.strip()] if joined else []
         if len(parts) != len(missing):
-            parts = [_machine(lines[i], src) for i in missing]
+            parts = [_machine(lines[i], src, allow_ai) for i in missing]
         for i, en in zip(missing, parts):
             if en and en.strip():
                 results[i] = en.strip()

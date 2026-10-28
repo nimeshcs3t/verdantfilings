@@ -73,6 +73,7 @@ def page() -> None:
             st.error(err) if err else st.success(f"Added {username.lower()}.")
 
     member_tools(me, rows)
+    mentions_tools()
     substack_check(me)
     security_panel()
     storage_panel()
@@ -320,3 +321,19 @@ def storage_panel() -> None:
         if st.button("Yes, delete them", type="primary", key="del-read-once"):
             done = storage.delete_read_once()
             st.success(f"Deleted {done:,} filings.")
+
+
+def mentions_tools() -> None:
+    """Re-scan every stored filing for the names of followed companies (contracts, supply deals, takeovers)."""
+    from core.usage import get_state
+    from services import connections
+    with st.expander("Company connections"):
+        full = get_state("mentions_full_scan")
+        st.caption("Every 30 minutes new filings are checked for the names of companies you follow, look up or "
+                   "added as peers; market-wide announcement titles too. "
+                   + (f"Last full scan of all stored filings: {full[:10]}." if full else "A full scan of all stored "
+                      "filings runs once by itself at the next background run."))
+        if st.button("Scan all stored filings now", key="mentions-full"):
+            with st.spinner("Scanning stored filings"):
+                n = connections.scan_mentions(None)
+            st.success(f"Found {n} new link{'s' if n != 1 else ''} between companies.")

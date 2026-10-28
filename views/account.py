@@ -64,6 +64,13 @@ def page() -> None:
     delivery_settings(user)
     data_section(user)
 
+    st.subheader("Install on your phone", divider=False)
+    st.markdown("Use Verdant Filings like a normal app, with its own icon and full screen:\n\n"
+                "- **iPhone / iPad (Safari):** open the app, tap the Share button, then **Add to Home Screen**.\n"
+                "- **Android (Chrome):** open the app, tap the ⋮ menu, then **Install app** (or **Add to Home screen**).\n"
+                "- **Computer (Chrome or Edge):** click the install icon at the right of the address bar.\n\n"
+                "Tick **Keep me signed in** when you sign in on your phone, so the app opens straight away.")
+
     st.subheader("Appearance", divider=False)
     st.caption("Dark mode follows your phone or computer setting. To choose yourself, open the ⋮ menu at the top "
                "right of the app, then Settings, then pick Light or Dark.")

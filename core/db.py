@@ -406,6 +406,7 @@ journal = Table(
     Column("review_on", Date),
     Column("reminded", Boolean, nullable=False, default=False),
     Column("created_at", DateTime(timezone=True), default=utcnow),
+    Column("filing_uid", String(64)),                   # set when the note was written on a filing
     Index("ix_journal_user", "user_id", "entry_date"),
 )
 
@@ -544,7 +545,7 @@ UPGRADES = [("journal", "target_price", "FLOAT"), ("company_meta", "shares", "FL
             ("sessions", "created_at", "TIMESTAMP WITH TIME ZONE"), ("sessions", "last_seen", "TIMESTAMP WITH TIME ZONE"), ("sessions", "device", "VARCHAR(80)"),
             ("sessions", "ip", "VARCHAR(64)"), ("sessions", "remember", "BOOLEAN"), ("share_links", "expires_at", "TIMESTAMP WITH TIME ZONE"),
             ("ipos", "open_date", "DATE"), ("ipos", "underwriters", "VARCHAR(300)"), ("ipos", "sources", "TEXT"),
-            ("ipos", "details", "TEXT"), ("ipos", "brief_src", "VARCHAR(20)")]
+            ("ipos", "details", "TEXT"), ("ipos", "brief_src", "VARCHAR(20)"), ("journal", "filing_uid", "VARCHAR(64)")]
 
 _engine: Engine | None = None
 _lock = threading.Lock()

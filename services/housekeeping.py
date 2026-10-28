@@ -25,7 +25,10 @@ def cleanup(force: bool = False) -> dict:
     removed = {}
     with get_engine().begin() as conn:
         from core.db import deleted_filings, filing_marks
-        starred = select(stars.c.uid).union(select(filing_marks.c.uid).where(filing_marks.c.mark == "keep"))
+        from core.db import journal
+        from sqlalchemy import union
+        starred = union(select(stars.c.uid), select(filing_marks.c.uid).where(filing_marks.c.mark == "keep"),
+                        select(journal.c.filing_uid).where(journal.c.filing_uid.is_not(None)))
         removed["old filings"] = conn.execute(delete(filings).where(
             filings.c.filed_date < date.today() - timedelta(days=KEEP_FILINGS_DAYS), filings.c.uid.not_in(starred))).rowcount
         removed["long texts trimmed"] = conn.execute(update(filings).where(

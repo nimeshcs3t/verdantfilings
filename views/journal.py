@@ -6,7 +6,8 @@ from core.ui import esc, html_block, logo_html, page_header
 from services import journal, portfolio, watch
 from services.pipeline import get_company
 
-KIND_CHIP = {"thesis": "earnings", "buy": "buyback", "sell": "mna", "update": "periodic", "review": "meeting", "lesson": "ownership"}
+KIND_CHIP = {"thesis": "earnings", "buy": "buyback", "sell": "mna", "update": "periodic", "review": "meeting", "lesson": "ownership",
+             "filing": "contract"}
 
 
 def _companies(uid: int) -> dict[str, tuple[str | None, str | None]]:
@@ -59,10 +60,18 @@ def entry_card(e: dict, show_company: bool = True, key: str = "j") -> None:
     if e["review_on"]:
         due = e["review_on"] <= date.today()
         review = f'<span class="fl-flag">{"Review due" if due else "Review"} {e["review_on"]:%d %b %Y}</span>'
+    on_filing = ""
+    if e.get("filing_uid"):
+        if e.get("filing_title"):
+            on_filing = (f'<div class="jn-filing">On filing: {e["filing_date"]:%d %b %Y} · {esc(e["filing_title"])}'
+                         + (f' · <a href="{esc(e["filing_url"])}" target="_blank" rel="noopener noreferrer">Original</a>'
+                            if e.get("filing_url") else "") + "</div>")
+        else:
+            on_filing = '<div class="jn-filing">On a filing that has since been removed</div>'
     html_block(f'<div class="fl-row" style="grid-template-columns:86px 1fr"><div class="fl-date">{e["entry_date"]:%d %b %Y}</div>'
                f'<div>{name}<div class="fl-title"><span class="chip c-{KIND_CHIP.get(e["kind"], "other")}" style="margin:0 8px 0 0">'
-               f'{esc(journal.KINDS[e["kind"]])}</span>{esc(e["title"] or "")}{review}</div>'
-               f'<div class="fl-orig">{esc(stars)} {tags}</div></div></div>')
+               f'{esc(journal.KINDS.get(e["kind"], e["kind"]))}</span>{esc(e["title"] or "")}{review}</div>'
+               f'{on_filing}<div class="fl-orig">{esc(stars)} {tags}</div></div></div>')
     if e["body"]:
         with st.expander("Notes"):
             st.markdown(e["body"])

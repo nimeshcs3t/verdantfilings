@@ -4,23 +4,38 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import delete, func, insert, select, update
 
-from core.db import get_engine, journal
+from core.db import filings, get_engine, journal
 
-KINDS = {"thesis": "Thesis", "buy": "Buy", "sell": "Sell", "update": "Update", "review": "Review", "lesson": "Lesson"}
+KINDS = {"thesis": "Thesis", "buy": "Buy", "sell": "Sell", "update": "Update", "review": "Review", "lesson": "Lesson",
+         "filing": "Filing note"}
 
 
-def entries(user_id: int, market: str | None = None, ticker: str | None = None) -> list[dict]:
-    q = select(journal).where(journal.c.user_id == user_id)
+def entries(user_id: int, market: str | None = None, ticker: str | None = None, filing_uid: str | None = None) -> list[dict]:
+    """Journal entries, newest first. Notes written on a filing carry that filing's date, title and link."""
+    q = (select(journal, filings.c.filed_date.label("filing_date"), filings.c.title_en.label("filing_title"),
+                filings.c.url.label("filing_url"))
+         .select_from(journal.outerjoin(filings, filings.c.uid == journal.c.filing_uid))
+         .where(journal.c.user_id == user_id))
     if market and ticker:
         q = q.where(journal.c.market == market, journal.c.ticker == ticker)
+    if filing_uid:
+        q = q.where(journal.c.filing_uid == filing_uid)
     with get_engine().connect() as conn:
         return [dict(r) for r in conn.execute(q.order_by(journal.c.entry_date.desc(), journal.c.id.desc())).mappings()]
 
 
+def note_counts(user_id: int) -> dict[str, int]:
+    """filing uid -> number of journal notes this member wrote on it."""
+    with get_engine().connect() as conn:
+        return dict(conn.execute(select(journal.c.filing_uid, func.count()).where(
+            journal.c.user_id == user_id, journal.c.filing_uid.is_not(None)).group_by(journal.c.filing_uid)).all())
+
+
 def add(user_id: int, market: str | None, ticker: str | None, entry_date: date, kind: str, title: str, body: str,
-        conviction: int | None, tags: str, review_on: date | None, target_price: float | None = None) -> str | None:
+        conviction: int | None, tags: str, review_on: date | None, target_price: float | None = None,
+        filing_uid: str | None = None) -> str | None:
     if kind not in KINDS or not (title or body).strip():
         return "Add a title or some text."
     with get_engine().begin() as conn:
@@ -28,7 +43,7 @@ def add(user_id: int, market: str | None, ticker: str | None, entry_date: date, 
                                             title=(title or "")[:200], body=(body or "")[:20000],
                                             conviction=conviction, tags=(tags or "")[:200], review_on=review_on,
                                             target_price=target_price if target_price and target_price > 0 else None,
-                                            reminded=False))
+                                            filing_uid=filing_uid, reminded=False))
     return None
 
 

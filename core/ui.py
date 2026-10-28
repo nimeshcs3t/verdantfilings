@@ -64,7 +64,10 @@ def css() -> str:
 {chips}
 .fl-flag.imp {{ color:var(--pine); border-color:var(--pine); }}
 .fl-mark {{ display:inline-block; font-size:.7rem; font-weight:600; border-radius:999px; padding:0 7px; margin-left:6px; vertical-align:1px; }}
-.fl-mark.keep {{ background:var(--pine); color:#fff; }} .fl-mark.once {{ border:1px dashed var(--muted); color:var(--muted); }}
+.fl-mark.keep {{ background:var(--pine); color:#fff; }} .fl-mark.note {{ border:1px solid var(--pine); color:var(--pine); }}
+.jn-prev {{ font-size:.84rem; border-left:2px solid var(--rule); padding:2px 0 2px 8px; margin:0 0 8px; }}
+.jn-prev div {{ color:var(--body-en); margin-top:2px; white-space:pre-wrap; }}
+.jn-filing {{ font-size:.8rem; color:var(--muted); margin-top:2px; }} .jn-filing a {{ color:var(--pine); }} .fl-mark.once {{ border:1px dashed var(--muted); color:var(--muted); }}
 div[class*="st-key-flag-"] button {{ font-size:.74rem !important; min-height:0 !important; padding:1px 9px !important; }}
 div[class*="st-key-flag-"] {{ margin:-6px 0 2px; }}
 .cal-ev.est {{ background:transparent !important; border:1px dashed var(--muted); color:var(--muted); }}
@@ -343,7 +346,7 @@ def summary_html(text: str) -> str:
 
 def filing_row_html(f: dict, show_company: bool = True, is_new: bool = False, country: str = "",
                     category: str = "other", move: str = "", starred: bool = False, important: bool = False,
-                    mark: str | None = None) -> str:
+                    mark: str | None = None, notes: int = 0) -> str:
     dot = '<span class="fl-new" title="Added in the last 2 hours"></span>' if is_new else ""
     star = '<span class="fl-star" title="You marked this Important">★</span>' if starred else ""
     where = f'<span class="fl-tk">{esc(country)}</span>' if country else ""
@@ -357,6 +360,8 @@ def filing_row_html(f: dict, show_company: bool = True, is_new: bool = False, co
         flag += '<span class="fl-mark keep" title="Kept: never deleted">Keep</span>'
     elif mark == "read_once":
         flag += '<span class="fl-mark once" title="Deleted when an admin frees up space">Read once</span>'
+    if notes:
+        flag += f'<span class="fl-mark note" title="Your journal notes on this filing">✎ {notes}</span>'
     orig = ""
     if f.get("title_local") and f["title_local"] != f.get("title_en"):
         orig = f'<div class="fl-orig ko">{esc(f["title_local"])}</div>'

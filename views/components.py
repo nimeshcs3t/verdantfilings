@@ -42,14 +42,18 @@ def render_filing(f: dict, key: str, show_company: bool = True, link_company: bo
     is_starred = bool(stars and f["uid"] in stars)
     mark = stars.get(f["uid"]) if isinstance(stars, dict) else ("important" if is_starred else None)
     from services.importance import score as importance_score
+    n_notes = (getattr(stars, "notes", {}) or {}).get(f["uid"], 0)
     html_block(filing_row_html(f, show_company, is_new, country, category, move, is_starred,
-                               important=importance_score(f) >= 75, mark=mark))
+                               important=importance_score(f) >= 75, mark=mark, notes=n_notes))
     user = st.session_state.get("user")
     if user:
         flag_key = f"flag-{key}-{f['uid']}"
-        st.pills("Flag", list(personal.MARK_LABELS), selection_mode="single", default=mark, key=flag_key,
-                 format_func=personal.MARK_LABELS.get, label_visibility="collapsed",
-                 on_change=_save_flag, args=(user["id"], f["uid"], flag_key))
+        with st.container(horizontal=True, vertical_alignment="center", gap="small", key=f"frow-{key}-{f['uid']}"):
+            st.pills("Flag", list(personal.MARK_LABELS), selection_mode="single", default=mark, key=flag_key,
+                     format_func=personal.MARK_LABELS.get, label_visibility="collapsed",
+                     on_change=_save_flag, args=(user["id"], f["uid"], flag_key))
+            with st.popover(f"Journal note ({n_notes})" if n_notes else "Journal note", icon=":material/history_edu:"):
+                filing_note_form(user["id"], f, key, n_notes)
     with st.expander("Overview and translation"):
         if f.get("summary_en"):
             _show_enriched(f)
@@ -71,6 +75,34 @@ def render_filing(f: dict, key: str, show_company: bool = True, link_company: bo
         if show_company and link_company:
             if st.button("Company page", key=f"co-{key}-{f['uid']}", type="tertiary"):
                 nav.open_company(f["market"], f["ticker"])
+
+
+def filing_note_form(uid: int, f: dict, key: str, n_notes: int = 0) -> None:
+    """Write a journal note on this filing. It's saved to the journal under the company, linked to the filing."""
+    from datetime import date
+    from services import journal
+    if n_notes:
+        for e in journal.entries(uid, filing_uid=f["uid"])[:5]:
+            html_block(f'<div class="jn-prev"><b>{e["entry_date"]:%d %b %Y}</b> {esc(journal.KINDS.get(e["kind"], ""))}'
+                       f'{": " + esc(e["title"]) if e.get("title") else ""}'
+                       + (f'<div>{esc((e["body"] or "")[:400])}</div>' if e.get("body") else "") + "</div>")
+        st.caption("All notes are on the Journal page and in the company's Journal section.")
+    with st.form(f"jn-{key}-{f['uid']}", clear_on_submit=True, border=False):
+        kinds = ["filing", "update", "thesis", "buy", "sell", "review", "lesson"]
+        kind = st.selectbox("Type", kinds, format_func=lambda k: journal.KINDS[k])
+        title = st.text_input("Title", placeholder="e.g. Guidance raised; margins better than I expected")
+        body = st.text_area("Note", height=120, placeholder="What this filing changes for your view...")
+        c1, c2 = st.columns(2)
+        target = c1.number_input("Price target", min_value=0.0, value=0.0, step=1.0, help="Optional; drawn on the price chart.")
+        review = c2.date_input("Review on", value=None, min_value=date.today())
+        if st.form_submit_button("Save to journal", type="primary"):
+            err = journal.add(uid, f["market"], f["ticker"], date.today(), kind, title or f"On: {f.get('title_en') or ''}"[:200],
+                              body, None, "", review, target or None, filing_uid=f["uid"])
+            if err:
+                st.warning(err)
+            else:
+                st.toast("Saved to your journal")
+                st.rerun()
 
 
 def _save_flag(user_id: int, uid: str, widget_key: str) -> None:

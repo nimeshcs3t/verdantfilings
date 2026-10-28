@@ -1,6 +1,7 @@
 """Database size and freeing space: deleting filings members marked 'Read once'.
 
-A filing is deleted only if someone marked it Read once and nobody marked it Important or Keep. Deleted filings are
+A filing is deleted only if someone marked it Read once, nobody marked it Important or Keep, and nobody wrote a
+journal note on it. Deleted filings are
 remembered (deleted_filings) so the background job never downloads them again or alerts about them twice."""
 from __future__ import annotations
 
@@ -15,7 +16,10 @@ RELATED = [filing_notes, filing_texts, filing_flags, enrich_queue, events, event
 
 def _deletable(conn) -> list[str]:
     read_once = select(filing_marks.c.uid).where(filing_marks.c.mark == "read_once")
-    protected = select(filing_marks.c.uid).where(filing_marks.c.mark == "keep").union(select(stars.c.uid))
+    from core.db import journal
+    from sqlalchemy import union
+    protected = union(select(filing_marks.c.uid).where(filing_marks.c.mark == "keep"), select(stars.c.uid),
+                      select(journal.c.filing_uid).where(journal.c.filing_uid.is_not(None)))
     return list(conn.execute(select(filings.c.uid).where(filings.c.uid.in_(read_once), filings.c.uid.not_in(protected))).scalars())
 
 

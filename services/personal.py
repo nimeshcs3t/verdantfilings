@@ -43,7 +43,13 @@ class Flags(dict):
 
 
 def flags(user_id: int) -> Flags:
+    """Also carries .notes: filing uid -> number of journal notes the member wrote on it."""
     out = Flags()
+    try:
+        from .journal import note_counts
+        out.notes = note_counts(user_id)
+    except Exception:
+        out.notes = {}
     with get_engine().connect() as conn:
         for uid, mark in conn.execute(select(filing_marks.c.uid, filing_marks.c.mark).where(filing_marks.c.user_id == user_id)):
             out[uid] = mark

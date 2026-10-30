@@ -30,16 +30,17 @@ def performance_svg(portfolio: list[tuple[date, float]], benchmark: list[tuple[d
     line = lambda series: " ".join(f"{x(d):.1f},{y(v):.1f}" for d, v in series if t0 <= d.toordinal() <= t1)
     grid = []
     step = _nice_step(hi - lo)
+    decimals = max(0, min(2, -math.floor(math.log10(step * 100) + 1e-9))) if step > 0 else 0   # 0.5% steps -> "+0.5%"
     tick = math.ceil(lo / step) * step
     while tick <= hi:
         grid.append(f'<line x1="{pad_l}" x2="{w - pad_r}" y1="{y(tick):.1f}" y2="{y(tick):.1f}" class="grid"/>'
-                    f'<text x="{pad_l - 6}" y="{y(tick) + 3:.1f}" text-anchor="end">{tick * 100:+.0f}%</text>')
+                    f'<text x="{pad_l - 6}" y="{y(tick) + 3:.1f}" text-anchor="end">{(tick * 100 if abs(tick) > 1e-12 else 0.0):+.{decimals}f}%</text>')
         tick += step
     zero = f'<line x1="{pad_l}" x2="{w - pad_r}" y1="{y(0):.1f}" y2="{y(0):.1f}" class="zero"/>'
     bench_line = f'<polyline class="bench" fill="none" points="{line(bpts)}"/>' if bpts else ""
     legend_b = (f'<span><i class="sw bench"></i>{esc(bench_name)} {bpts[-1][1] * 100:+.1f}%</span>' if bpts else "")
     return (f'<div class="perf"><div class="perf-legend"><span><i class="sw port"></i>Portfolio {pts[-1][1] * 100:+.1f}%</span>'
-            f'{legend_b}<span class="perf-range">{pts[0][0]:%d %b %Y} to {pts[-1][0]:%d %b %Y}</span></div>'
+            f'{legend_b}<span class="perf-range">{pts[0][0]:%d %b %Y} to {pts[-1][0]:%d %b %Y}{" (closing prices)" if len(pts) == 2 else ""}</span></div>'
             f'<svg viewBox="0 0 {w} {h}" preserveAspectRatio="none" role="img" aria-label="Portfolio return versus benchmark">'
             f'{"".join(grid)}{zero}{bench_line}<polyline class="port" fill="none" points="{line(pts)}"/></svg></div>')
 

@@ -16,7 +16,7 @@ from .portfolio_charts import donut_svg, performance_svg
 
 YEARS = 4
 BENCHMARKS = {"S&P 500 (SPY)": "SPY", "Nasdaq 100 (QQQ)": "QQQ", "No benchmark": None}
-CHART_PERIODS = ["1W", "1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "All"]
+CHART_PERIODS = ["1D", "1W", "1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "All"]
 
 
 OTHER_LABEL = "Other (any Yahoo Finance symbol)"
@@ -271,7 +271,11 @@ def overview(model: dict, base: str, bench_symbol: str | None) -> None:
                                   label_visibility="collapsed") or "1Y"
     index, daily = model["index"], model["daily"]
     end = index[-1][0]
-    start = {"1W": end - timedelta(days=7), "1M": end - timedelta(days=30), "3M": end - timedelta(days=91), "6M": end - timedelta(days=182),
+    if period == "1D":       # last close against the one before (prices are daily, so this is a two-point line)
+        start = (daily[-1]["date"] if method == "On your money" else (index[-2][0] if len(index) >= 2 else end))
+    else:
+        start = None
+    start = start or {"1W": end - timedelta(days=7), "1M": end - timedelta(days=30), "3M": end - timedelta(days=91), "6M": end - timedelta(days=182),
              "YTD": date(end.year, 1, 1), "1Y": end - timedelta(days=365), "2Y": end - timedelta(days=730),
              "3Y": end - timedelta(days=1095), "All": index[0][0]}[period]
     if method == "On your money":

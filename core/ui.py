@@ -10,10 +10,12 @@ import streamlit as st
 
 from .db import as_utc, utcnow
 
-LIGHT = {"ink": "#1B2430", "muted": "#5F6B7A", "rule": "#E3E7E5", "pine": "#1F6B4F", "pine-soft": "#EDF4F0",
-         "amber": "#A8641A", "up": "#1C7C4A", "down": "#B3261E", "card": "#FFFFFF", "body-en": "#2D3643"}
-DARK = {"ink": "#E4E9E6", "muted": "#9AA6A0", "rule": "#2A322F", "pine": "#5DBE93", "pine-soft": "#15302A",
-        "amber": "#E3A45C", "up": "#5CCB8A", "down": "#F2837A", "card": "#141A18", "body-en": "#CDD5D1"}
+LIGHT = {"ink": "#17212B", "muted": "#5E6A73", "rule": "#E2E7E4", "pine": "#1E6A4E", "pine-soft": "#EAF2EE",
+         "amber": "#A9621B", "up": "#1B7A47", "down": "#B4321F", "card": "#FFFFFF", "body-en": "#2B3540",
+         "surface": "#F4F6F5", "rule-strong": "#C9D2CD"}
+DARK = {"ink": "#E6ECE9", "muted": "#96A39D", "rule": "#27302D", "pine": "#62C59A", "pine-soft": "#16302A",
+        "amber": "#E0A35E", "up": "#5FCB8C", "down": "#F08A7E", "card": "#151C1A", "body-en": "#CBD4D0",
+        "surface": "#18201E", "rule-strong": "#38433F"}
 # Category chip colours: (light background, light text, dark background, dark text)
 CHIP = {
     "earnings": ("#E3F4EA", "#17613A", "#173726", "#8FD8AE"), "dividend": ("#E0F2F1", "#11625C", "#12332F", "#86D4CC"),
@@ -38,17 +40,27 @@ def css() -> str:
     dark = is_dark()
     v = DARK if dark else LIGHT
     tokens = "".join(f"--{k}:{val};" for k, val in v.items())
-    chips = "".join(f".chip.c-{k}{{background:{c[2] if dark else c[0]};color:{c[3] if dark else c[1]};}}"
+    chips = "".join(f".chip.c-{k}{{color:{c[3] if dark else c[1]};}}"
+                    f".fl-row.c-{k}{{box-shadow:inset 3px 0 0 {c[3] if dark else c[1]};}}"
                     for k, c in CHIP.items())
     if dark:
         chips += (".k-results{background:#173726 !important}.k-meeting{background:#232838 !important}"
                   ".k-dividend{background:#12332F !important}.k-other{background:#242A28 !important}")
     return f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500&family=Noto+Sans+JP:wght@400;500&display=swap');
+/* IBM Plex (SIL Open Font License), served with the app: no third-party font requests */
+@font-face {{ font-family:'IBM Plex Sans'; font-style:normal; font-weight:400; font-display:swap; src:url('app/static/fonts/ibm-plex-sans-latin-400-normal.woff2') format('woff2'); unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }}
+@font-face {{ font-family:'IBM Plex Sans'; font-style:normal; font-weight:400; font-display:swap; src:url('app/static/fonts/ibm-plex-sans-latin-ext-400-normal.woff2') format('woff2'); unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }}
+@font-face {{ font-family:'IBM Plex Sans'; font-style:normal; font-weight:500; font-display:swap; src:url('app/static/fonts/ibm-plex-sans-latin-500-normal.woff2') format('woff2'); unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }}
+@font-face {{ font-family:'IBM Plex Sans'; font-style:normal; font-weight:500; font-display:swap; src:url('app/static/fonts/ibm-plex-sans-latin-ext-500-normal.woff2') format('woff2'); unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }}
+@font-face {{ font-family:'IBM Plex Sans'; font-style:normal; font-weight:600; font-display:swap; src:url('app/static/fonts/ibm-plex-sans-latin-600-normal.woff2') format('woff2'); unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }}
+@font-face {{ font-family:'IBM Plex Sans'; font-style:normal; font-weight:600; font-display:swap; src:url('app/static/fonts/ibm-plex-sans-latin-ext-600-normal.woff2') format('woff2'); unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }}
+@font-face {{ font-family:'IBM Plex Sans Condensed'; font-style:normal; font-weight:500; font-display:swap; src:url('app/static/fonts/ibm-plex-sans-condensed-latin-500-normal.woff2') format('woff2'); }}
+@font-face {{ font-family:'IBM Plex Sans Condensed'; font-style:normal; font-weight:600; font-display:swap; src:url('app/static/fonts/ibm-plex-sans-condensed-latin-600-normal.woff2') format('woff2'); }}
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500&family=Noto+Sans+JP:wght@400;500&display=swap');
 :root {{ {tokens} }}
 .stApp, .stApp p, .stApp li, .stApp input, .stApp textarea, .stApp label, .stApp button,
-.stApp h1, .stApp h2, .stApp h3 {{ font-family:'Public Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }}
+.stApp h1, .stApp h2, .stApp h3, .stApp td, .stApp th {{ font-family:'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }}
 [data-testid="stMainBlockContainer"], .block-container {{ max-width:1120px; padding-top:2rem; }}
 .stAppDeployButton, [data-testid="stDecoration"], footer {{ display:none !important; }}
 .ko {{ font-family:'Noto Sans KR', 'Noto Sans JP', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }}
@@ -265,6 +277,92 @@ div[class*="st-key-flag-"] {{ margin:-6px 0 2px; }}
   .fl-date {{ grid-column:1 / -1; padding-top:0; }}
   .fl-title {{ font-size:.98rem; }}
 }}
+
+/* ---- v22 design layer: a quiet register; category shown as a thin coloured spine ---- */
+
+@media (max-width: 640px) {{
+  .st-key-today-filters [data-testid="stHorizontalBlock"] {{ flex-wrap:wrap !important; gap:.5rem .75rem !important; }}
+  .st-key-today-filters [data-testid="stColumn"] {{ min-width:calc(50% - .4rem) !important; flex:1 1 calc(50% - .4rem) !important; width:calc(50% - .4rem) !important; }}
+  .st-key-today-filters [data-testid="stColumn"]:empty, .st-key-today-filters [data-testid="stColumn"]:not(:has(*)) {{ display:none; }}
+}}
+.stApp {{ color:var(--ink); }}
+.page-title, .co-name, .brand {{ font-family:'IBM Plex Sans Condensed', 'IBM Plex Sans', sans-serif; font-weight:600;
+  letter-spacing:-0.005em; }}
+.page-title, .stApp h1.page-title {{ font-size:1.9rem !important; line-height:1.15 !important; margin:0 0 .25rem !important;
+  padding:0 !important; font-family:'IBM Plex Sans Condensed', 'IBM Plex Sans', sans-serif !important; font-weight:600 !important; }}
+.page-sub {{ max-width:68ch; font-size:.98rem; line-height:1.5; }}
+.co-name {{ font-size:1.9rem; }}
+.stApp h2, .stApp h3 {{ font-weight:600; letter-spacing:-0.005em; }}
+.stApp [data-testid="stHeading"] h3 {{ font-size:1.12rem; }}
+
+/* filings */
+.fl-row {{ grid-template-columns:52px 1fr auto; gap:14px; padding:12px 0 2px 14px; border-top:1px solid var(--rule); }}
+.fl-row.nodate {{ grid-template-columns:1fr auto; }}
+.fl-date {{ font-size:.8rem; }}
+.fl-co {{ font-size:.9rem; font-weight:600; }}
+.fl-co .logo {{ width:20px; height:20px; font-size:.58rem; border-radius:5px; margin-right:8px; vertical-align:-5px; }}
+.fl-title {{ font-size:1rem; line-height:1.42; margin-top:2px; }}
+.chip {{ background:none !important; padding:0; border-radius:0; font-size:.76rem; font-weight:600; margin-left:10px; vertical-align:0; }}
+.fl-flag {{ border:none; padding:0; border-radius:0; font-size:.76rem; margin-left:10px; vertical-align:0; }}
+.fl-flag.imp {{ color:var(--pine); }}
+.fl-mark {{ border:none !important; background:none !important; padding:0; margin-left:10px; font-size:.76rem; vertical-align:0; }}
+.fl-mark.keep {{ color:var(--pine); }} .fl-mark.once {{ color:var(--muted); font-style:italic; }} .fl-mark.note {{ color:var(--pine); }}
+.fl-link a {{ font-size:.82rem; }}
+.day-head {{ display:flex; align-items:baseline; gap:10px; margin:26px 0 0; padding-bottom:2px; }}
+.day-head b {{ font-family:'IBM Plex Sans Condensed', 'IBM Plex Sans', sans-serif; font-weight:600; font-size:1.02rem; color:var(--ink); }}
+.day-head span {{ color:var(--muted); font-size:.8rem; }}
+.day-head + div .fl-row, .day-head + .fl-row {{ border-top:none; }}
+
+/* the quiet action line under each filing */
+div[class*="st-key-fil-"] {{ gap:.1rem !important; }}
+div[class*="st-key-fil-"] [data-testid="stMarkdownContainer"], div[class*="st-key-fil-"] [data-testid="stMarkdown"] {{ margin-bottom:0 !important; }}
+div[class*="st-key-fil-"] .fl-row {{ padding-bottom:6px; }}
+div[class*="st-key-fil-"] [data-testid="stElementContainer"] {{ margin:0 !important; }}
+div[class*="st-key-frow-"] {{ padding-left:14px; gap:2px !important; margin:0 0 2px; }}
+div[class*="st-key-flag-"] {{ margin:0 !important; }}
+div[class*="st-key-flag-"] button {{ border:none !important; background:none !important; color:var(--muted) !important;
+  font-size:.78rem !important; padding:0 8px 0 0 !important; min-height:26px !important; box-shadow:none !important; }}
+div[class*="st-key-flag-"] button p {{ font-size:.78rem !important; }}
+div[class*="st-key-flag-"] button[kind$="Active"], div[class*="st-key-flag-"] button[aria-pressed="true"],
+div[class*="st-key-flag-"] button[aria-checked="true"] {{ color:var(--pine) !important; font-weight:600 !important; }}
+div[class*="st-key-frow-"] [data-testid="stPopover"] button {{ border:none !important; background:none !important;
+  color:var(--muted) !important; font-size:.78rem !important; min-height:26px !important; padding:0 6px !important; box-shadow:none !important; }}
+div[class*="st-key-frow-"] [data-testid="stPopover"] button p {{ font-size:.78rem !important; }}
+div[class*="st-key-frow-"] {{ flex-wrap:wrap !important; }}
+div[class*="st-key-fil-"] [data-testid="stExpander"] {{ margin-left:0; width:auto !important; }}
+div[class*="st-key-frow-"] > div:has([data-testid="stExpander"]) {{ width:auto !important; flex:0 1 auto !important; }}
+div[class*="st-key-frow-"] > div:has(details[open]) {{ flex-basis:100% !important; width:100% !important; }}
+div[class*="st-key-fil-"] [data-testid="stExpander"] summary {{ padding:4px 6px !important; }}
+div[class*="st-key-fil-"] [data-testid="stExpander"] details {{ border:none !important; background:none !important; }}
+div[class*="st-key-fil-"] [data-testid="stExpander"] summary {{ font-size:.8rem; color:var(--muted); min-height:0; }}
+div[class*="st-key-fil-"] [data-testid="stExpander"] summary p {{ font-size:.8rem !important; }}
+div[class*="st-key-fil-"] [data-testid="stExpander"] summary:hover {{ color:var(--pine); }}
+div[class*="st-key-fil-"] [data-testid="stExpanderDetails"] {{ padding:0 0 10px !important; }}
+
+/* figures: a plain strip, not boxed cards */
+.stat-grid, .dash, .qv {{ display:flex; flex-wrap:wrap; gap:0; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule);
+  margin:6px 0 16px; padding:10px 0; }}
+.stat-grid .stat, .dash .stat, .qv .stat {{ border:none; border-radius:0; padding:2px 22px 2px 0; margin:0 22px 0 0;
+  border-right:1px solid var(--rule); min-width:0; }}
+.stat-grid .stat:last-child, .dash .stat:last-child, .qv .stat:last-child {{ border-right:none; margin-right:0; }}
+.stat .k {{ font-size:.78rem; }}
+.stat .v {{ font-size:1.18rem; font-weight:600; font-variant-numeric:tabular-nums; margin-top:1px; }}
+.dash .stat {{ flex:1 1 0; }}
+.dash .stat .sub {{ max-width:260px; }}
+.ret, .alloc, .perf, .chart, .fin, .heat {{ border-radius:6px; }}
+.empty {{ background:var(--surface); border:none; border-radius:6px; color:var(--muted); }}
+
+/* category filter on Today: outlined, coloured text */
+.st-key-today-cats button {{ background:none !important; border:1px solid var(--rule) !important; }}
+
+/* inputs and tabs a touch calmer */
+.stApp [data-baseweb="tab-list"] {{ gap:18px; }}
+.stApp [data-baseweb="tab"] p {{ font-size:.92rem; }}
+@media (max-width:640px) {{
+  .fl-row, .fl-row.nodate {{ grid-template-columns:1fr auto; padding-left:12px; }}
+  .stat-grid .stat, .dash .stat, .qv .stat {{ flex:1 1 40%; border-right:none; margin:0 0 8px; padding-right:8px; }}
+  .page-title, .co-name {{ font-size:1.5rem; }}
+}}
 </style>
 """
 
@@ -346,7 +444,7 @@ def summary_html(text: str) -> str:
 
 def filing_row_html(f: dict, show_company: bool = True, is_new: bool = False, country: str = "",
                     category: str = "other", move: str = "", starred: bool = False, important: bool = False,
-                    mark: str | None = None, notes: int = 0) -> str:
+                    mark: str | None = None, notes: int = 0, show_date: bool = True) -> str:
     dot = '<span class="fl-new" title="Added in the last 2 hours"></span>' if is_new else ""
     star = '<span class="fl-star" title="You marked this Important">★</span>' if starred else ""
     where = f'<span class="fl-tk">{esc(country)}</span>' if country else ""
@@ -365,7 +463,8 @@ def filing_row_html(f: dict, show_company: bool = True, is_new: bool = False, co
     orig = ""
     if f.get("title_local") and f["title_local"] != f.get("title_en"):
         orig = f'<div class="fl-orig ko">{esc(f["title_local"])}</div>'
-    return (f'<div class="fl-row"><div class="fl-date">{short_date(f["filed_date"])}</div>'
+    date_cell = f'<div class="fl-date">{short_date(f["filed_date"])}</div>' if show_date else ""
+    return (f'<div class="fl-row c-{esc(category)}{"" if show_date else " nodate"}">{date_cell}'
             f'<div>{company}<div class="fl-title">{lead}{esc(f["title_en"])}{chip_html(category)}{flag}</div>{orig}</div>'
             f'<div class="fl-side"><span class="fl-link"><a href="{esc(f["url"])}" target="_blank" '
             f'rel="noopener noreferrer">Original</a></span>{move}</div></div>')
@@ -379,3 +478,10 @@ def news_html(items: list[dict]) -> str:
         out.append(f'<div class="news"><a href="{esc(n["link"])}" target="_blank" rel="noopener noreferrer">'
                    f'{esc(n["title"])}</a>{orig}<div class="news-meta">{meta}</div></div>')
     return "".join(out)
+
+
+def day_heading(d: date, count: int) -> None:
+    """A day in a list of filings: 'Friday 30 October' and how many filings."""
+    today = date.today()
+    name = "Today" if d == today else "Yesterday" if d == today - timedelta(days=1) else f"{d:%A} {d.day} {d:%B}"
+    html_block(f'<div class="day-head"><b>{esc(name)}</b><span>{count} filing{"s" if count != 1 else ""}</span></div>')

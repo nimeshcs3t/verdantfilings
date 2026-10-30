@@ -34,7 +34,13 @@ def histories(pairs: list[tuple[str, str]]) -> dict[tuple[str, str], list]:
 
 
 def render_filing(f: dict, key: str, show_company: bool = True, link_company: bool = True,
-                  country: str = "", hist: list | None = None, stars: set | None = None) -> None:
+                  country: str = "", hist: list | None = None, stars: set | None = None, show_date: bool = True) -> None:
+    with st.container(key=f"fil-{key}-{f['uid']}"):
+        _render_filing(f, key, show_company, link_company, country, hist, stars, show_date)
+
+
+def _render_filing(f: dict, key: str, show_company: bool, link_company: bool, country: str, hist: list | None,
+                   stars, show_date: bool) -> None:
     created = as_utc(f.get("created_at"))
     is_new = bool(created and utcnow() - created < timedelta(hours=2))
     category = categorize(f.get("title_en"), f.get("title_local"), f.get("price_sensitive"))
@@ -44,37 +50,38 @@ def render_filing(f: dict, key: str, show_company: bool = True, link_company: bo
     from services.importance import score as importance_score
     n_notes = (getattr(stars, "notes", {}) or {}).get(f["uid"], 0)
     html_block(filing_row_html(f, show_company, is_new, country, category, move, is_starred,
-                               important=importance_score(f) >= 75, mark=mark, notes=n_notes))
+                               important=importance_score(f) >= 75, mark=mark, notes=n_notes, show_date=show_date))
     user = st.session_state.get("user")
-    if user:
-        flag_key = f"flag-{key}-{f['uid']}"
-        with st.container(horizontal=True, vertical_alignment="center", gap="small", key=f"frow-{key}-{f['uid']}"):
+    # one quiet line under the filing: flags, journal note and the overview toggle (opens to full width)
+    with st.container(horizontal=True, vertical_alignment="center", gap="small", key=f"frow-{key}-{f['uid']}"):
+        if user:
+            flag_key = f"flag-{key}-{f['uid']}"
             st.pills("Flag", list(personal.MARK_LABELS), selection_mode="single", default=mark, key=flag_key,
                      format_func=personal.MARK_LABELS.get, label_visibility="collapsed",
                      on_change=_save_flag, args=(user["id"], f["uid"], flag_key))
             with st.popover(f"Journal note ({n_notes})" if n_notes else "Journal note", icon=":material/history_edu:"):
                 filing_note_form(user["id"], f, key, n_notes)
-    with st.expander("Overview and translation"):
-        if f.get("summary_en"):
-            _show_enriched(f)
-            _ask_box(f, key)
-        elif not direct_fetch() and is_queued(f["uid"]):
-            st.caption("The overview is being prepared. It usually takes a few minutes; reload the page then.")
-        elif st.button("Translate and summarize", key=f"enrich-{key}-{f['uid']}"):
-            with st.spinner("Reading the filing"):
-                enriched = enrich_filing(f["uid"])
-            if enriched and enriched.get("enrich_pending"):
-                github.trigger_sync()
-                st.success("Requested. The overview will be ready in a few minutes; reload the page then.")
-            elif enriched and enriched.get("summary_en"):
-                _show_enriched(enriched)
+        with st.expander("Overview and translation" if f.get("title_local") and f.get("title_local") != f.get("title_en") else "Overview"):
+            if f.get("summary_en"):
+                _show_enriched(f)
+                _ask_box(f, key)
+            elif not direct_fetch() and is_queued(f["uid"]):
+                st.caption("The overview is being prepared. It usually takes a few minutes; reload the page then.")
+            elif st.button("Translate and summarize", key=f"enrich-{key}-{f['uid']}"):
+                with st.spinner("Reading the filing"):
+                    enriched = enrich_filing(f["uid"])
+                if enriched and enriched.get("enrich_pending"):
+                    github.trigger_sync()
+                    st.success("Requested. The overview will be ready in a few minutes; reload the page then.")
+                elif enriched and enriched.get("summary_en"):
+                    _show_enriched(enriched)
+                else:
+                    st.warning((enriched or {}).get("enrich_error", "This filing couldn't be processed."))
             else:
-                st.warning((enriched or {}).get("enrich_error", "This filing couldn't be processed."))
-        else:
-            st.caption("Translates the filing to English and writes a short overview.")
-        if show_company and link_company:
-            if st.button("Company page", key=f"co-{key}-{f['uid']}", type="tertiary"):
-                nav.open_company(f["market"], f["ticker"])
+                st.caption("Translates the filing to English and writes a short overview.")
+            if show_company and link_company:
+                if st.button("Company page", key=f"co-{key}-{f['uid']}", type="tertiary"):
+                    nav.open_company(f["market"], f["ticker"])
 
 
 def filing_note_form(uid: int, f: dict, key: str, n_notes: int = 0) -> None:

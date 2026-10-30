@@ -207,8 +207,12 @@ def page() -> None:
 
     with t_over:
         if not model or not model["rows"]:
-            html_block('<div class="empty">No holdings yet. Add your buys in the Transactions tab to see returns, '
-                       'allocation and rebalancing.</div>')
+            if txs:
+                html_block('<div class="empty">Your transactions are saved, but prices or exchange rates for them '
+                           'couldn\'t be loaded just now, so returns can\'t be worked out. Try again in a few minutes.</div>')
+            else:
+                html_block('<div class="empty">No holdings yet. Add your buys in the Transactions tab, or import a '
+                           'broker statement, to see returns, allocation and rebalancing.</div>')
         else:
             overview(model, base, bench_symbol)
     with t_hold:
@@ -588,10 +592,16 @@ def _import_resolver(market: str, symbol: str) -> dict | None:
 
 def import_section(user: dict, markets: dict) -> None:
     with st.expander("Import from a broker file (CSV)", icon=":material/upload_file:"):
+        st.caption("Interactive Brokers: upload an Activity Statement CSV (Reports, Statements, Activity, format CSV); "
+                   "its open positions and trades are read automatically. ")
         st.caption("Export your trades from your broker as a CSV file and upload it here. You'll see every row checked "
                    "before anything is saved, and rows already in your transactions are skipped.")
         up = st.file_uploader("Broker CSV file", type=["csv", "txt"], key="imp-file")
         if not up:
+            return
+        from services import ibkr
+        if ibkr.detect(up.getvalue()):
+            ibkr_import(user, up)
             return
         try:
             frame = importer.read(up.getvalue())
@@ -643,6 +653,86 @@ def import_section(user: dict, markets: dict) -> None:
             st.session_state["pf-note"] = f"Imported {saved} transaction{'s' if saved != 1 else ''}." + (
                 " Problems: " + "; ".join(errors[:5]) if errors else "")
             st.rerun()
+
+
+def ibkr_import(user: dict, up) -> None:
+    """Interactive Brokers activity statement: positions synced as differences, trades imported one by one."""
+    from datetime import date as _date
+    from services import ibkr
+    from sources import configured_sources
+    parsed = ibkr.parse(up.getvalue())
+    configured = {s.market for s in configured_sources()}
+    file_key = f"ibkr:{up.name}:{up.size}"
+    if st.session_state.get("ibkr-key") != file_key:
+        st.session_state["ibkr-key"] = file_key
+        for k in ("ibkr-pos", "ibkr-trades"):
+            st.session_state.pop(k, None)
+    when = parsed["period"]
+    st.markdown(f"**{parsed['broker']}** statement" + (f" for {when:%d %b %Y}" if when else "")
+                + f": {len(parsed['positions'])} open position{'s' if len(parsed['positions']) != 1 else ''}"
+                + (f", {len(parsed['trades'])} trades" if parsed["trades"] else "") + ".")
+    if parsed["trades"]:
+        st.markdown("**Trades**")
+        if st.button("Check trades", key="ibkr-check-trades"):
+            import pandas as _pd
+            recs = []
+            for t in parsed["trades"]:
+                found = ibkr.resolve(t["currency"], t["symbol"], _import_resolver, configured)
+                recs.append({"date": t["date"].isoformat() if t["date"] else "", "symbol": found[1] if found else t["symbol"],
+                             "action": t["kind"], "shares": str(t["shares"]), "price": str(t["price"]), "fees": str(t["fees"]),
+                             "market": found[0] if found else ""})
+            frame = _pd.DataFrame(recs)
+            mapping = {k: k for k in ("date", "symbol", "action", "shares", "price", "fees", "market")}
+            with st.spinner("Checking each trade"):
+                st.session_state["ibkr-trades"] = importer.plan(frame, mapping, "US", False, user["id"], _import_resolver)
+        rows = st.session_state.get("ibkr-trades")
+        if rows:
+            st.dataframe(pd.DataFrame([{"Status": r["status"], "Date": r.get("date"), "Symbol": r.get("symbol"),
+                                        "Company": r.get("name", ""), "Type": r.get("kind") or "", "Quantity": r.get("shares"),
+                                        "Price": r.get("price"), "Fees": r.get("fees"), "Note": r.get("note", "")} for r in rows]),
+                         hide_index=True, width="stretch")
+            n = sum(1 for r in rows if r["status"] in ("ready", "warning"))
+            if st.button(f"Import {n} trade{'s' if n != 1 else ''}", type="primary", disabled=n == 0, key="ibkr-go-trades"):
+                saved, errors = importer.save(rows, user["id"], True)
+                st.session_state.pop("ibkr-trades", None)
+                st.session_state["pf-note"] = f"Imported {saved} trade{'s' if saved != 1 else ''}." + (
+                    " Problems: " + "; ".join(errors[:5]) if errors else "")
+                st.rerun()
+    if not parsed["positions"]:
+        return
+    st.markdown("**Open positions**")
+    st.caption("Compared with what you already hold here. Only the differences are added, so importing the same "
+               "statement again changes nothing.")
+    if st.button("Compare with my holdings", key="ibkr-check-pos"):
+        with st.spinner("Matching each holding"):
+            st.session_state["ibkr-pos"] = ibkr.plan_positions(parsed, portfolio.current_holdings(user["id"]),
+                                                               _import_resolver, configured)
+    rows = st.session_state.get("ibkr-pos")
+    if not rows:
+        return
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+    st.markdown("   ".join(f"**{counts[k]}** {k}" for k in ("new", "more", "fewer", "matches", "not found") if k in counts))
+    table = pd.DataFrame([{"Apply": bool(r.get("apply")), "Symbol": r["symbol"], "Company": r.get("name", ""),
+                           "Market": r.get("market", ""), "At IBKR": r["broker"], "In the app": r.get("app"),
+                           "Change": ({"buy": "+", "sell": "−"}.get(r.get("kind"), "") + f"{r['shares']:,.4g}") if r.get("kind") else "",
+                           "Price": r.get("price"), "Currency": r["currency"], "Note": r.get("note", "")} for r in rows])
+    edited = st.data_editor(table, hide_index=True, width="stretch", key="ibkr-editor",
+                            disabled=[c for c in table.columns if c != "Apply"],
+                            column_config={"Apply": st.column_config.CheckboxColumn(width="small"),
+                                           "Price": st.column_config.NumberColumn(format="%.4g")})
+    for r, flag in zip(rows, edited["Apply"].tolist()):
+        r["apply"] = bool(flag) and bool(r.get("kind"))
+    on = st.date_input("Date for these transactions", value=when or _date.today(), max_value=_date.today(), key="ibkr-date",
+                       help="New holdings and changes are recorded on this date, at IBKR's average cost.")
+    n = sum(1 for r in rows if r["apply"])
+    if st.button(f"Apply {n} change{'s' if n != 1 else ''}", type="primary", disabled=n == 0, key="ibkr-go-pos"):
+        saved, errors = ibkr.apply_positions(rows, user["id"], on)
+        st.session_state.pop("ibkr-pos", None)
+        st.session_state["pf-note"] = f"Updated {saved} holding{'s' if saved != 1 else ''} from your IBKR statement." + (
+            " Problems: " + "; ".join(errors[:5]) if errors else "")
+        st.rerun()
 
 
 def alerts_tab(user: dict) -> None:

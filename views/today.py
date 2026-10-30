@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 
 import streamlit as st
 
@@ -13,14 +13,14 @@ from sources import get_source
 
 from .components import add_company_form, cached_english_news, histories, render_filing, render_news
 
-PERIODS = {"Today": 0, "Last 7 days": 7, "Last 30 days": 30}
+PERIODS = {"Last 3 days": 2, "Today": 0, "Last 7 days": 6, "Last 30 days": 29}   # days before today
 
 
 def page() -> None:
     user = st.session_state["user"]
     wl = watch.get_watchlist(user["id"])
     markets = sorted({w["market"] for w in wl}) or ["KR"]
-    today = max(get_source(m).today() for m in markets)
+    today = date.today()          # the app's day (US Eastern unless APP_TIMEZONE says otherwise)
 
     if not wl:
         page_header(long_date(today), "Add the companies you follow and their filings will show up here each day.")
@@ -41,13 +41,12 @@ def page() -> None:
     choice = st.session_state.get("today-market") or "All"
     if len(markets) > 1 and choice != "All":
         wl = [w for w in wl if get_source(w["market"]).country == choice] or all_wl
-        today = get_source(wl[0]["market"]).today()
 
-    period = st.session_state.get("today-period") or "Today"
-    rows = []
-    for m in sorted({w["market"] for w in wl}):
-        since = get_source(m).today() - timedelta(days=PERIODS[period])
-        rows += filings_for([(w["market"], w["ticker"]) for w in wl if w["market"] == m], since)
+    period = st.session_state.get("today-period") or "Last 3 days"
+    if period not in PERIODS:
+        period = "Last 3 days"
+    since = today - timedelta(days=PERIODS[period])
+    rows = filings_for([(w["market"], w["ticker"]) for w in wl], since)
     rows.sort(key=lambda r: (r["filed_date"], r["uid"]), reverse=True)
     for r in rows:
         r["category"] = categorize(r["title_en"], r["title_local"], r.get("price_sensitive"))
@@ -67,8 +66,9 @@ def page() -> None:
 
     main, side = st.columns([2.2, 1], gap="large")
     with main:
-        cols = st.columns(4)
-        cols[0].selectbox("Period", list(PERIODS), key="today-period")
+        cols = st.container(key="today-filters").columns(4)
+        cols[0].selectbox("Period", list(PERIODS), key="today-period",
+                          help="Days start at midnight US Eastern time.")
         cols[1].selectbox("View", ["By time", "By company"], key="today-view")
         cols[2].selectbox("Sort", ["Newest first", "Most important first"], key="today-sort")
         if len(markets) > 1:
@@ -80,7 +80,6 @@ def page() -> None:
         present = [k for k in ORDER if any(r["category"] == k for r in rows)]
         counts = {k: sum(r["category"] == k for r in rows) for k in present}
         if present:
-            st.caption("Tap categories to filter (tap again to clear).")
             html_block(category_css(present))
             picked = st.pills("Categories", present, selection_mode="multi", key="today-cats",
                               format_func=lambda k: f"{label(k)} {counts.get(k, 0)}", label_visibility="collapsed") or []
@@ -116,9 +115,15 @@ def page() -> None:
                 for r in items:
                     render_filing(r, key="today", show_company=False, hist=hist.get((m, t)), stars=stars)
         else:
+            from core.ui import day_heading
+            by_day: dict = {}
             for r in rows:
-                render_filing(r, key="today", country=get_source(r["market"]).country if label_country else "",
-                              hist=hist.get((r["market"], r["ticker"])), stars=stars)
+                by_day.setdefault(r["filed_date"], []).append(r)
+            for d, items in by_day.items():
+                day_heading(d, len(items))
+                for r in items:
+                    render_filing(r, key="today", country=get_source(r["market"]).country if label_country else "",
+                                  hist=hist.get((r["market"], r["ticker"])), stars=stars, show_date=False)
         for credit in sorted({get_source(r["market"]).attribution for r in rows} - {""}):
             st.caption(credit)
 
@@ -163,9 +168,7 @@ def dashboard(user: dict, wl: list[dict]) -> None:
             week = s.get("week_pct")
             wk = "" if week is None else f' · 1W <span class="mv {"up" if week > 0 else "down" if week < 0 else "flat"}">{week * 100:+.2f}%</span>'
             tiles.append(("Portfolio", value, f"1D {move}{esc(amount)}{wk}"))
-    todays = []
-    for m in {w["market"] for w in wl}:
-        todays += filings_for([(w["market"], w["ticker"]) for w in wl if w["market"] == m], get_source(m).today())
+    todays = filings_for([(w["market"], w["ticker"]) for w in wl], date.today())
     major = [r for r in todays if is_major(r)]
     companies = len({(r["market"], r["ticker"]) for r in todays})
     tiles.append(("Filings today", f"{len(todays)}", f"from {companies} compan{'y' if companies == 1 else 'ies'}"))
@@ -187,8 +190,8 @@ def category_css(keys: list[str]) -> str:
         c = CHIP.get(k, CHIP["other"])
         bg, fg = (c[2], c[3]) if dark else (c[0], c[1])
         sel = f".st-key-today-cats button:nth-of-type({i})"
-        rules.append(f"{sel}{{background:{bg} !important;color:{fg} !important;border:1px solid transparent !important;}}"
+        rules.append(f"{sel}{{background:none !important;color:{fg} !important;}}"
                      f"{sel}[kind$='Active'],{sel}[aria-pressed='true'],{sel}[aria-checked='true']"
-                     f"{{border:2px solid {fg} !important;font-weight:700 !important;}}"
+                     f"{{background:{bg} !important;border-color:{fg} !important;font-weight:600 !important;}}"
                      f"{sel} p{{color:{fg} !important;}}")
     return "<style>" + "".join(rules) + "</style>"

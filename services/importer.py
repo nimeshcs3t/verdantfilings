@@ -98,6 +98,14 @@ def day_first_guess(values: list[str]) -> bool:
 
 def market_of(text: str, default: str) -> str:
     t = str(text or "").strip().upper()
+    if t == portfolio.OTHER:
+        return t
+    try:                                  # a market code the app knows ('US', 'IL', 'FR'...)
+        from sources import get_source
+        if t and len(t) <= 3 and get_source(t):
+            return t
+    except Exception:
+        pass
     for code, names in MARKETS.items():
         if t in names:
             return code

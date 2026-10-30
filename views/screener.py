@@ -130,13 +130,15 @@ def my_companies(user: dict) -> None:
 
 # ---- US market --------------------------------------------------------------------------------------------------------
 @st.cache_data(ttl=1800, show_spinner=False)
-def _us_rows() -> list[dict]:
+def _us_rows(version: str) -> list[dict]:
+    """Cached per data version (last price and figure update), so a new load shows at once."""
     return us_screener.rows()
 
 
 def us_stocks(user: dict) -> None:
-    data = _us_rows()
     info = us_screener.status()
+    version = f"{info.get('prices_at')}|{info.get('figures_at')}|{info.get('stocks')}"
+    data = _us_rows(version) if info.get("stocks") else []
     if not data:
         html_block('<div class="empty">US market data isn\'t loaded yet. It loads with the IPO calendar job (twice a '
                    'day); the admin can run it now on GitHub (Actions, IPO calendar, Run workflow).</div>')

@@ -26,7 +26,8 @@ inject_css()
 from core import pwa  # noqa: E402
 pwa.inject()
 try:
-    st.logo("assets/logo.svg", size="large")
+    from core.ui import is_dark
+    st.logo("assets/logo-dark.svg" if is_dark() else "assets/logo.svg", size="large")
 except Exception:
     pass
 

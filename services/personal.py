@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from core.db import as_utc, filing_marks, get_engine, keywords, notes, sessions, stars, user_prefs, utcnow, watch_prefs
 
-DEFAULT_PREFS = {"alert_mode": "instant", "digest_hour": 18, "tz": "UTC", "skip_insider": False, "weekly": True,
+DEFAULT_PREFS = {"alert_mode": "instant", "digest_hour": 18, "tz": "America/New_York", "skip_insider": False, "weekly": True,
                  "last_digest": None, "last_weekly": None}
 REMEMBER_DAYS = 30
 
@@ -89,7 +89,11 @@ def save_note(user_id: int, market: str, ticker: str, body: str) -> None:
 def get_prefs(user_id: int) -> dict:
     with get_engine().connect() as conn:
         row = conn.execute(select(user_prefs).where(user_prefs.c.user_id == user_id)).mappings().first()
-    return {**DEFAULT_PREFS, **(dict(row) if row else {}), "user_id": user_id}
+    prefs = {**DEFAULT_PREFS, **(dict(row) if row else {}), "user_id": user_id}
+    if prefs.get("tz") in (None, "", "UTC"):       # the old default: follow the app's day (US Eastern unless changed)
+        from core.config import app_tz
+        prefs["tz"] = app_tz()
+    return prefs
 
 
 def save_prefs(user_id: int, **values) -> None:

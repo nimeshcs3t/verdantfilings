@@ -7,9 +7,9 @@ from core.ui import esc, html_block, page_header
 from services import backup, emailer, personal, settings as settings_svc, telegram
 from sources import configured_sources, visible_sources
 
-TIMEZONES = ["UTC", "Asia/Seoul", "Asia/Tokyo", "Asia/Kolkata", "Asia/Singapore", "Asia/Hong_Kong", "Asia/Dubai",
+TIMEZONES = ["America/New_York", "Asia/Seoul", "Asia/Tokyo", "Asia/Kolkata", "Asia/Singapore", "Asia/Hong_Kong", "Asia/Dubai",
              "Asia/Jerusalem", "Australia/Sydney", "Europe/London", "Europe/Warsaw", "Europe/Paris",
-             "America/New_York", "America/Chicago", "America/Los_Angeles"]
+             "America/Chicago", "America/Los_Angeles"]
 
 
 def page() -> None:

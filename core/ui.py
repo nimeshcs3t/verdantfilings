@@ -36,16 +36,32 @@ def is_dark() -> bool:
         return False
 
 
-def css() -> str:
-    dark = is_dark()
+def _theme_vars(dark: bool) -> str:
     v = DARK if dark else LIGHT
-    tokens = "".join(f"--{k}:{val};" for k, val in v.items())
-    chips = "".join(f".chip.c-{k}{{color:{c[3] if dark else c[1]};}}"
-                    f".fl-row.c-{k}{{box-shadow:inset 3px 0 0 {c[3] if dark else c[1]};}}"
-                    for k, c in CHIP.items())
-    if dark:
-        chips += (".k-results{background:#173726 !important}.k-meeting{background:#232838 !important}"
-                  ".k-dividend{background:#12332F !important}.k-other{background:#242A28 !important}")
+    out = "".join(f"--{k}:{val};" for k, val in v.items())
+    for k, c in CHIP.items():                       # category colours: --cf-<k> text, --cb-<k> soft background
+        out += f"--cf-{k}:{c[3] if dark else c[1]};--cb-{k}:{c[2] if dark else c[0]};"
+    out += ("--k-results:#173726;--k-meeting:#232838;--k-dividend:#12332F;--k-other:#242A28;" if dark else
+            "--k-results:initial;--k-meeting:initial;--k-dividend:initial;--k-other:initial;")
+    return out
+
+
+def css() -> str:
+    """Both palettes are sent. The server's guess sets the start; a small script then checks the page's real
+    background and sets <html data-vf="light|dark">, so text never ends up light-on-light or dark-on-dark."""
+    dark = is_dark()
+    guess, light_vars, dark_vars = _theme_vars(dark), _theme_vars(False), _theme_vars(True)
+    tokens = guess + " } html[data-vf='light'] { " + light_vars + " } html[data-vf='dark'] { " + dark_vars
+    chips = "".join(f".chip.c-{k}{{color:var(--cf-{k});}}.fl-row.c-{k}{{box-shadow:inset 3px 0 0 var(--cf-{k});}}"
+                    for k in CHIP)
+    chips += ("html[data-vf='dark'] .k-results, html[data-vf='dark'] .k-meeting, html[data-vf='dark'] .k-dividend, "
+              "html[data-vf='dark'] .k-other" if not dark else ".k-results, .k-meeting, .k-dividend, .k-other") + "{}"
+    for k in ("results", "meeting", "dividend", "other"):
+        sel = f".k-{k}" if dark else f"html[data-vf='dark'] .k-{k}"
+        chips += f"{sel}{{background:var(--k-{k}) !important}}"
+    # the logo image is chosen on the server; flip its colours if the page turns out to be the other theme
+    chips += (f"html[data-vf='{'light' if dark else 'dark'}'] img[data-testid*='Logo']"
+              "{filter:invert(1) hue-rotate(180deg);}")
     return f"""
 <style>
 /* IBM Plex (SIL Open Font License), served with the app: no third-party font requests */
@@ -76,7 +92,7 @@ def css() -> str:
 {chips}
 .fl-flag.imp {{ color:var(--pine); border-color:var(--pine); }}
 .fl-mark {{ display:inline-block; font-size:.7rem; font-weight:600; border-radius:999px; padding:0 7px; margin-left:6px; vertical-align:1px; }}
-.fl-mark.keep {{ background:var(--pine); color:#fff; }} .fl-mark.note {{ border:1px solid var(--pine); color:var(--pine); }}
+.fl-mark.keep {{ background:var(--pine); color:var(--card); }} .fl-mark.note {{ border:1px solid var(--pine); color:var(--pine); }}
 .jn-prev {{ font-size:.84rem; border-left:2px solid var(--rule); padding:2px 0 2px 8px; margin:0 0 8px; }}
 .jn-prev div {{ color:var(--body-en); margin-top:2px; white-space:pre-wrap; }}
 .jn-filing {{ font-size:.8rem; color:var(--muted); margin-top:2px; }} .jn-filing a {{ color:var(--pine); }} .fl-mark.once {{ border:1px dashed var(--muted); color:var(--muted); }}
@@ -234,7 +250,7 @@ div[class*="st-key-flag-"] {{ margin:-6px 0 2px; }}
 .ipo-brief {{ font-size:.92rem; line-height:1.5; color:var(--body-en); margin:6px 0 4px; max-width:860px; }}
 .ipo-brief.none {{ color:var(--muted); font-size:.82rem; font-style:italic; }}
 .ipo-src {{ color:var(--muted); font-size:.74rem; }}
-.fl-flag.open {{ background:var(--up); color:#fff; border-color:var(--up); }}
+.fl-flag.open {{ background:var(--up); color:var(--card); border-color:var(--up); }}
 .ipo-srcs {{ display:flex; flex-wrap:wrap; gap:6px 8px; }}
 .ipo-srcs span {{ border:1px solid var(--rule); border-radius:999px; padding:2px 10px; font-size:.82rem; }}
 .ipo-srcs span::before {{ content:"●"; margin-right:6px; }}
@@ -377,8 +393,32 @@ div[class*="st-key-fil-"] [data-testid="stExpanderDetails"] {{ padding:0 0 10px 
 """
 
 
+_THEME_JS = """<script>
+(function () {
+  if (window.__vfTheme) { window.__vfTheme(); return; }
+  function lum(c) { var m = (c || "").match(/\\d+(\\.\\d+)?/g); if (!m || m.length < 3) return null;
+    if (m.length > 3 && parseFloat(m[3]) === 0) return null;
+    return 0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2]; }
+  function check() {
+    var app = document.querySelector(".stApp") || document.body; if (!app) return;
+    var l = lum(getComputedStyle(app).backgroundColor); if (l === null) return;
+    var mode = l < 128 ? "dark" : "light";
+    if (document.documentElement.getAttribute("data-vf") !== mode) document.documentElement.setAttribute("data-vf", mode);
+  }
+  window.__vfTheme = check; check(); setInterval(check, 800);
+})();
+</script>"""
+
+
 def inject_css() -> None:
     st.markdown(css(), unsafe_allow_html=True)
+    if st.session_state.get("_vf_theme_js"):      # the script keeps running in the page once added
+        return
+    try:
+        st.html(_THEME_JS, unsafe_allow_javascript=True)
+        st.session_state["_vf_theme_js"] = True
+    except Exception:
+        pass
 
 
 def esc(value) -> str:

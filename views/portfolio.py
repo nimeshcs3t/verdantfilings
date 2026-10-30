@@ -592,16 +592,19 @@ def _import_resolver(market: str, symbol: str) -> dict | None:
 
 def import_section(user: dict, markets: dict) -> None:
     with st.expander("Import from a broker file (CSV)", icon=":material/upload_file:"):
-        st.caption("Interactive Brokers: upload an Activity Statement CSV (Reports, Statements, Activity, format CSV); "
-                   "its open positions and trades are read automatically. ")
-        st.caption("Export your trades from your broker as a CSV file and upload it here. You'll see every row checked "
-                   "before anything is saved, and rows already in your transactions are skipped.")
+        html_block('<div class="imp-help"><b>Read automatically</b><ul>'
+                   '<li><b>Interactive Brokers</b>: Reports › Statements › Activity, format CSV (positions and trades)</li>'
+                   '<li><b>Fidelity</b>: Positions › Download (holdings), or Activity &amp; Orders › History › Download (trades)</li>'
+                   '<li><b>Robinhood</b>: Account › Reports and statements › Reports, generate an account activity report (trades)</li>'
+                   '</ul>Any other broker: export your trades as CSV and match the columns below. Every row is checked '
+                   'before anything is saved, and rows you already have are skipped.</div>')
         up = st.file_uploader("Broker CSV file", type=["csv", "txt"], key="imp-file")
         if not up:
             return
-        from services import ibkr
-        if ibkr.detect(up.getvalue()):
-            ibkr_import(user, up)
+        from services import brokers
+        broker_kind = brokers.identify(up.getvalue())
+        if broker_kind:
+            broker_import(user, up, broker_kind)
             return
         try:
             frame = importer.read(up.getvalue())
@@ -655,20 +658,21 @@ def import_section(user: dict, markets: dict) -> None:
             st.rerun()
 
 
-def ibkr_import(user: dict, up) -> None:
-    """Interactive Brokers activity statement: positions synced as differences, trades imported one by one."""
+def broker_import(user: dict, up, kind: str) -> None:
+    """A recognised broker export (IBKR, Fidelity, Robinhood): positions synced as differences, trades checked one by one."""
     from datetime import date as _date
-    from services import ibkr
+    from services import brokers, ibkr
     from sources import configured_sources
-    parsed = ibkr.parse(up.getvalue())
+    parsed = brokers.parse(kind, up.getvalue())
+    who = parsed.get("short") or parsed["broker"]
     configured = {s.market for s in configured_sources()}
-    file_key = f"ibkr:{up.name}:{up.size}"
+    file_key = f"{kind}:{up.name}:{up.size}"
     if st.session_state.get("ibkr-key") != file_key:
         st.session_state["ibkr-key"] = file_key
         for k in ("ibkr-pos", "ibkr-trades"):
             st.session_state.pop(k, None)
     when = parsed["period"]
-    st.markdown(f"**{parsed['broker']}** statement" + (f" for {when:%d %b %Y}" if when else "")
+    st.markdown(f"**{parsed['broker']}** file" + (f" for {when:%d %b %Y}" if when else "")
                 + f": {len(parsed['positions'])} open position{'s' if len(parsed['positions']) != 1 else ''}"
                 + (f", {len(parsed['trades'])} trades" if parsed["trades"] else "") + ".")
     if parsed["trades"]:
@@ -698,6 +702,8 @@ def ibkr_import(user: dict, up) -> None:
                 st.session_state["pf-note"] = f"Imported {saved} trade{'s' if saved != 1 else ''}." + (
                     " Problems: " + "; ".join(errors[:5]) if errors else "")
                 st.rerun()
+    if not parsed["positions"] and not parsed["trades"]:
+        st.info("No stock holdings or buys and sells were found in this file.")
     if not parsed["positions"]:
         return
     st.markdown("**Open positions**")
@@ -715,7 +721,7 @@ def ibkr_import(user: dict, up) -> None:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     st.markdown("   ".join(f"**{counts[k]}** {k}" for k in ("new", "more", "fewer", "matches", "not found") if k in counts))
     table = pd.DataFrame([{"Apply": bool(r.get("apply")), "Symbol": r["symbol"], "Company": r.get("name", ""),
-                           "Market": r.get("market", ""), "At IBKR": r["broker"], "In the app": r.get("app"),
+                           "Market": r.get("market", ""), f"At {who}": r["broker"], "In the app": r.get("app"),
                            "Change": ({"buy": "+", "sell": "−"}.get(r.get("kind"), "") + f"{r['shares']:,.4g}") if r.get("kind") else "",
                            "Price": r.get("price"), "Currency": r["currency"], "Note": r.get("note", "")} for r in rows])
     edited = st.data_editor(table, hide_index=True, width="stretch", key="ibkr-editor",
@@ -725,12 +731,12 @@ def ibkr_import(user: dict, up) -> None:
     for r, flag in zip(rows, edited["Apply"].tolist()):
         r["apply"] = bool(flag) and bool(r.get("kind"))
     on = st.date_input("Date for these transactions", value=when or _date.today(), max_value=_date.today(), key="ibkr-date",
-                       help="New holdings and changes are recorded on this date, at IBKR's average cost.")
+                       help=f"New holdings and changes are recorded on this date, at {who}'s average cost.")
     n = sum(1 for r in rows if r["apply"])
     if st.button(f"Apply {n} change{'s' if n != 1 else ''}", type="primary", disabled=n == 0, key="ibkr-go-pos"):
         saved, errors = ibkr.apply_positions(rows, user["id"], on)
         st.session_state.pop("ibkr-pos", None)
-        st.session_state["pf-note"] = f"Updated {saved} holding{'s' if saved != 1 else ''} from your IBKR statement." + (
+        st.session_state["pf-note"] = f"Updated {saved} holding{'s' if saved != 1 else ''} from your {who} file." + (
             " Problems: " + "; ".join(errors[:5]) if errors else "")
         st.rerun()
 

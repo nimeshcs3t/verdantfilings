@@ -279,6 +279,9 @@ div[class*="st-key-flag-"] {{ margin:-6px 0 2px; }}
 }}
 
 /* ---- v22 design layer: a quiet register; category shown as a thin coloured spine ---- */
+.imp-help {{ font-size:.85rem; color:var(--muted); line-height:1.5; margin-bottom:.6rem; }}
+.imp-help b {{ color:var(--ink); font-weight:500; }}
+.imp-help ul {{ margin:.25rem 0 .5rem 1.1rem; padding:0; }}
 
 @media (max-width: 640px) {{
   .st-key-today-filters [data-testid="stHorizontalBlock"] {{ flex-wrap:wrap !important; gap:.5rem .75rem !important; }}
@@ -320,11 +323,18 @@ div[class*="st-key-fil-"] .fl-row {{ padding-bottom:6px; }}
 div[class*="st-key-fil-"] [data-testid="stElementContainer"] {{ margin:0 !important; }}
 div[class*="st-key-frow-"] {{ padding-left:14px; gap:2px !important; margin:0 0 2px; }}
 div[class*="st-key-flag-"] {{ margin:0 !important; }}
-div[class*="st-key-flag-"] button {{ border:none !important; background:none !important; color:var(--muted) !important;
-  font-size:.78rem !important; padding:0 8px 0 0 !important; min-height:26px !important; box-shadow:none !important; }}
-div[class*="st-key-flag-"] button p {{ font-size:.78rem !important; }}
-div[class*="st-key-flag-"] button[kind$="Active"], div[class*="st-key-flag-"] button[aria-pressed="true"],
-div[class*="st-key-flag-"] button[aria-checked="true"] {{ color:var(--pine) !important; font-weight:600 !important; }}
+div[class*="st-key-flag-"] [data-testid="stButtonGroup"] > div {{ gap:6px !important; }}
+div[class*="st-key-flag-"] button {{ border:1px solid var(--rule-strong) !important; background:var(--card, transparent) !important;
+  color:var(--ink) !important; border-radius:999px !important; padding:0 10px !important; min-height:26px !important;
+  height:26px !important; box-shadow:none !important; transition:background .12s, border-color .12s, color .12s; }}
+div[class*="st-key-flag-"] button p {{ font-size:.78rem !important; font-weight:500 !important; }}
+div[class*="st-key-flag-"] button:hover {{ border-color:var(--ink) !important; }}
+/* chosen flag: filled, each in its own colour (Important amber, Keep green, Read once grey) */
+div[class*="st-key-flag-"] button[aria-checked="true"], div[class*="st-key-flag-"] button[aria-checked="true"] p {{ color:var(--card) !important; }}
+div[class*="st-key-flag-"] button[aria-checked="true"] p {{ font-weight:600 !important; }}
+div[class*="st-key-flag-"] button:nth-of-type(1)[aria-checked="true"] {{ background:var(--amber) !important; border-color:var(--amber) !important; }}
+div[class*="st-key-flag-"] button:nth-of-type(2)[aria-checked="true"] {{ background:var(--pine) !important; border-color:var(--pine) !important; }}
+div[class*="st-key-flag-"] button:nth-of-type(3)[aria-checked="true"] {{ background:var(--muted) !important; border-color:var(--muted) !important; }}
 div[class*="st-key-frow-"] [data-testid="stPopover"] button {{ border:none !important; background:none !important;
   color:var(--muted) !important; font-size:.78rem !important; min-height:26px !important; padding:0 6px !important; box-shadow:none !important; }}
 div[class*="st-key-frow-"] [data-testid="stPopover"] button p {{ font-size:.78rem !important; }}

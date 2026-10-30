@@ -122,6 +122,7 @@ def resolve(currency: str, symbol: str, resolver, configured: set[str]) -> tuple
 
 
 def plan_positions(parsed: dict, holdings: list[dict], resolver, configured: set[str]) -> list[dict]:
+    who = parsed.get("short") or "IBKR"
     """One row per broker position: what the app holds, the difference, and the transaction that would fix it."""
     held = {(h["market"], h["ticker"]): h["shares"] for h in holdings}
     rows = []
@@ -141,13 +142,13 @@ def plan_positions(parsed: dict, holdings: list[dict], resolver, configured: set
             row.update(status="matches", note="Already the same")
         elif app == 0:
             row.update(status="new", kind="buy", shares=p["shares"], apply=True,
-                       note="New holding at IBKR's average cost")
+                       note=f"New holding at {who}'s average cost")
         elif diff > 0:
             row.update(status="more", kind="buy", shares=diff, apply=True,
-                       note=f"IBKR shows {diff:,.4g} more; added at IBKR's average cost")
+                       note=f"{who} shows {diff:,.4g} more; added at {who}'s average cost")
         else:
             row.update(status="fewer", kind="sell", shares=-diff, price=p["close_price"] or p["cost_price"],
-                       note=f"IBKR shows {-diff:,.4g} fewer; tick to record a sale at the statement's closing price "
+                       note=f"{who} shows {-diff:,.4g} fewer; tick to record a sale at the latest price in the file "
                             "(leave unticked if you hold the rest at another broker)")
         if not row.get("price"):
             row.update(status="not found", apply=False, note="No price in the statement")

@@ -1,26 +1,26 @@
-   [theme]
-   font = "sans serif"
+[theme]
+font = "sans serif"
 
-   [theme.light]
-   primaryColor = "#1F6B4F"
-   backgroundColor = "#FFFFFF"
-   secondaryBackgroundColor = "#F2F5F3"
-   textColor = "#1B2430"
+[theme.light]
+primaryColor = "#1E6A4E"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6F5"
+textColor = "#17212B"
 
-   [theme.dark]
-   primaryColor = "#5DBE93"
-   backgroundColor = "#0F1413"
-   secondaryBackgroundColor = "#1A211F"
-   textColor = "#E4E9E6"
+[theme.dark]
+primaryColor = "#62C59A"
+backgroundColor = "#101615"
+secondaryBackgroundColor = "#18201E"
+textColor = "#E6ECE9"
 
-   [client]
-   toolbarMode = "viewer"
-   showSidebarNavigation = false
+[client]
+toolbarMode = "viewer"
+showSidebarNavigation = false
 
-   [server]
-   enableStaticServing = true
-   enableXsrfProtection = true
-   fileWatcherType = "none"
+[server]
+enableXsrfProtection = true
+enableStaticServing = true
+fileWatcherType = "none"
 
-   [browser]
-   gatherUsageStats = false
+[browser]
+gatherUsageStats = false

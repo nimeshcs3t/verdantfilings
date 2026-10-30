@@ -187,8 +187,8 @@ def category_css(keys: list[str]) -> str:
     dark = is_dark()
     rules = []
     for i, k in enumerate(keys, 1):
-        c = CHIP.get(k, CHIP["other"])
-        bg, fg = (c[2], c[3]) if dark else (c[0], c[1])
+        kk = k if k in CHIP else "other"
+        bg, fg = f"var(--cb-{kk})", f"var(--cf-{kk})"      # follow the page's real theme (see core.ui.css)
         sel = f".st-key-today-cats button:nth-of-type({i})"
         rules.append(f"{sel}{{background:none !important;color:{fg} !important;}}"
                      f"{sel}[kind$='Active'],{sel}[aria-pressed='true'],{sel}[aria-checked='true']"

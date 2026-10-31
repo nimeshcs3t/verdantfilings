@@ -16,8 +16,12 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like
 
 
 class PoliteClient:
-    def __init__(self, name: str, pause: float = 0.5, block_hours: int = 6, headers: dict | None = None):
+    def __init__(self, name: str, pause: float = 0.5, block_hours: int = 6, headers: dict | None = None,
+                 timeout: int = 60, network_strikes: int = 0):
+        """network_strikes: after this many timeouts / dropped connections in a row, pause the source like a refusal
+        (0 = never). For sites that throttle by going silent instead of answering 429."""
         self.name, self.pause, self.block_hours = name, pause, block_hours
+        self.timeout, self.network_strikes, self._strikes = timeout, network_strikes, 0
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9", **(headers or {})})
         self._last = 0.0
@@ -41,18 +45,30 @@ class PoliteClient:
         if wait > 0:
             time.sleep(wait)
         self._last = time.time()
-        r = self.session.request(method, url, timeout=kw.pop("timeout", 60), **kw)
+        try:
+            r = self.session.request(method, url, timeout=kw.pop("timeout", self.timeout), **kw)
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            self._strikes += 1
+            if self.network_strikes and self._strikes >= self.network_strikes:
+                self._strikes = 0
+                self._block(f"stopped answering ({exc.__class__.__name__})")
+                raise SourceBusy(f"{self.name} isn't answering") from exc
+            raise
+        self._strikes = 0
         if r.status_code in (403, 429):
-            try:
-                from core.usage import set_state
-                until = datetime.now(timezone.utc) + timedelta(hours=self.block_hours)
-                set_state(self._state_key(), until.isoformat())
-            except Exception:
-                pass
-            log.warning("%s refused a request (status %s); paused for %d hours", self.name, r.status_code, self.block_hours)
+            self._block(f"refused a request (status {r.status_code})")
             raise SourceBusy(f"{self.name} refused the request")
         r.raise_for_status()
         return r
+
+    def _block(self, why: str) -> None:
+        try:
+            from core.usage import set_state
+            until = datetime.now(timezone.utc) + timedelta(hours=self.block_hours)
+            set_state(self._state_key(), until.isoformat())
+        except Exception:
+            pass
+        log.warning("%s %s; paused for %d hours", self.name, why, self.block_hours)
 
     def get(self, url: str, **kw) -> requests.Response:
         return self.request("GET", url, **kw)

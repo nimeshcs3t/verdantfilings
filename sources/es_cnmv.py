@@ -91,7 +91,9 @@ class CnmvSource(FilingSource):
     resolve_in_app = True
 
     def __init__(self):
-        self.http = PoliteClient("cnmv", pause=1.0, headers={"Referer": f"{BASE}/portal/home.aspx?lang=en"})
+        self.http = PoliteClient("cnmv", pause=2.0, block_hours=8, timeout=25, network_strikes=2,
+                                 headers={"Referer": f"{BASE}/portal/home.aspx?lang=en",
+                                          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"})
         self._at, self._lock = 0.0, threading.Lock()
 
     def is_configured(self) -> bool:

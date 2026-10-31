@@ -12,7 +12,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from core.config import get_secret
 
@@ -217,6 +217,160 @@ class EuronextSource(FilingSource):
         return any_text(r.content, r.headers.get("content-type") or "")
 
 
+# ---- Italy: eMarket Storage (the authorised storage most Milan companies use), Euronext list as backup ------------
+EMARKET = "https://www.emarketstorage.it"
+IT_LEGAL = re.compile(r"\b(S\.?\s?P\.?\s?A\.?|S\.?R\.?L\.?|SOCIETA'?|PER AZIONI|N\.?V\.?|HOLDING|GROUP|GRUPPO)\b\.?", re.I)
+
+
+def it_plain(name: str) -> str:
+    n = IT_LEGAL.sub(" ", (name or "").upper().replace(",", " "))
+    return " ".join(re.sub(r"[^A-Z0-9 ]", " ", n).split())
+
+
+def parse_emarket(html: str) -> list[dict]:
+    """Rows of an eMarket Storage list: {date, company, company_id, title, url, protocol}."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    out, seen = [], set()
+    for a in soup.select('a[href*="/comunicati/"][href$=".pdf"]'):
+        href = a["href"] if a["href"].startswith("http") else EMARKET + a["href"]
+        if href in seen:
+            continue
+        box, text = a, ""
+        for _ in range(6):
+            if box.parent is None:
+                break
+            box = box.parent
+            text = " ".join(box.get_text(" ").split())
+            if re.search(r"\d{1,2}/\d{1,2}/\d{4}", text) and box.select_one('a[href*="azienda="]'):
+                break
+        m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", text)
+        if not m:
+            continue
+        a1, a2, y = int(m[1]), int(m[2]), int(m[3])
+        try:      # the English site writes MM/DD/YYYY; fall back to DD/MM if that's impossible
+            when = date(y, a1, a2) if a1 <= 12 else date(y, a2, a1)
+        except ValueError:
+            continue
+        co = box.select_one('a[href*="azienda="]')
+        cid = re.search(r"azienda=(\d+)", co["href"]).group(1) if co else ""
+        company = " ".join(co.get_text(" ").split()) if co else ""
+        if not company and co and co.find("img"):
+            company = co.find("img").get("alt") or ""
+        title = " ".join(a.get_text(" ").split())
+        proto = re.search(r"_(\d+)\.pdf$", href)
+        seen.add(href)
+        out.append({"date": when, "company": company, "company_id": cid, "title": title or "Regulated information",
+                    "url": href, "protocol": proto.group(1) if proto else hashlib.sha1(href.encode()).hexdigest()[:12]})
+    return out
+
+
+class ItalySource(EuronextSource):
+    """Milan: regulated information from eMarket Storage, matched by company name; Euronext press releases when
+    the company isn't on eMarket (some Italian companies use another storage service)."""
+    regulator = "eMarket Storage / Euronext"
+    attribution = "Source: eMarket Storage (Teleborsa) and Euronext (personal use)"
+    _em = None
+
+    @property
+    def em(self) -> PoliteClient:
+        if ItalySource._em is None:
+            ItalySource._em = PoliteClient("emarket", pause=1.0, headers={"Referer": f"{EMARKET}/en"})
+        return ItalySource._em
+
+    def _em_list(self, **params) -> list[dict]:
+        base = {"cerca": "", "titolo": "", "data_from": "", "data_to": "", "categoria": "All", "azienda": "",
+                "mercato": "", "tipo_ricerca": ""}
+        return parse_emarket(self.em.get(f"{EMARKET}/en/node/21", params={**base, **params}).text)
+
+    def _em_companies(self) -> dict[str, str]:
+        """eMarket company ids by plain name: the list's company filter, or else the issuers on recent pages."""
+        if getattr(self, "_em_ids", None) is not None:
+            return self._em_ids
+        from bs4 import BeautifulSoup
+        ids: dict[str, str] = {}
+        try:
+            soup = BeautifulSoup(self.em.get(f"{EMARKET}/en/node/21").text, "html.parser")
+            for opt in soup.select('select[name="azienda"] option'):
+                if (opt.get("value") or "").isdigit():
+                    ids.setdefault(it_plain(opt.get_text()), opt["value"])
+            if not ids:
+                for page in range(12):
+                    for r in self._em_list(page=page):
+                        if r["company_id"] and r["company"]:
+                            ids.setdefault(it_plain(r["company"]), r["company_id"])
+        except Exception as exc:
+            if exc.__class__.__name__ == "SourceBusy":
+                raise
+            log.warning("eMarket company list failed for IT: %s", exc)
+        self._em_ids = ids
+        return ids
+
+    def _em_id(self, name: str) -> str | None:
+        want = it_plain(name)
+        ids = self._em_companies()
+        if want in ids:
+            return ids[want]
+        close = [k for k in ids if k.split()[:1] == want.split()[:1] and (k.startswith(want) or want.startswith(k))]
+        return ids[min(close, key=len)] if close else None
+
+    def resolve(self, ticker: str) -> Company | None:
+        from services.prices import symbol_details
+        t = self.normalize_ticker(ticker)
+        details = symbol_details(f"{t}{self.suffix}") if t else None
+        if not details:
+            return None
+        cid = self._em_id(details["name"])
+        if cid:
+            return Company(self.market, t, f"em:{cid}", details["name"], details["name"])
+        return super().resolve(ticker)
+
+    def external_links(self, company: Company) -> list[tuple[str, str]]:
+        if company.source_id.startswith("em:"):
+            return [("eMarket Storage", f"{EMARKET}/en/node/21?azienda={company.source_id[3:]}")]
+        return super().external_links(company)
+
+    def list_filings(self, company: Company, start: date, end: date) -> list[Filing]:
+        if not company.source_id.startswith("em:"):
+            return super().list_filings(company, start, end)
+        out = []
+        for page in range(5):
+            cid = company.source_id[3:]
+            rows = self._em_list(azienda=cid, page=page)
+            for r in rows:
+                if start <= r["date"] <= end and r["company_id"] in ("", cid):
+                    title = r["title"]
+                    out.append(Filing(uid=f"IT:em{r['protocol']}", market=self.market, ticker=company.ticker,
+                                      company_name=company.name_en, filed_date=r["date"], title_local=title,
+                                      filer="Regulated information", url=r["url"],
+                                      title_en=title if title.isascii() and not re.search(r"\b(di|del|della|e|per)\b", title) else ""))
+            if not rows or min(r["date"] for r in rows) < start:
+                break
+        return out
+
+    def market_feed(self) -> list[dict]:
+        out = []
+        for page in range(3):
+            for r in self._em_list(page=page):
+                if r["date"] >= self.today() - timedelta(days=1):
+                    out.append({"uid": f"IT:em{r['protocol']}", "ticker": "", "company": r["company"],
+                                "title_local": r["title"], "title_en": r["title"] if r["title"].isascii() else "",
+                                "url": r["url"], "date": r["date"]})
+        return out
+
+    def fetch_document_text(self, uid: str) -> str:
+        if not uid.startswith("IT:em"):
+            return super().fetch_document_text(uid)
+        from sqlalchemy import select
+        from core.db import filings, get_engine
+        with get_engine().connect() as conn:
+            url = conn.execute(select(filings.c.url).where(filings.c.uid == uid)).scalar()
+        if not url:
+            return ""
+        r = self.em.get(url)
+        return any_text(r.content, r.headers.get("content-type") or "")
+
+
 def euronext_sources() -> list[EuronextSource]:
     return [
         EuronextSource("NL", "Netherlands", "Amsterdam", ("XAMS", "TNLA", "ALXA"), ".AS", "AMS", "nl", "Europe/Amsterdam",
@@ -227,6 +381,6 @@ def euronext_sources() -> list[EuronextSource]:
                        {"hl": "pt-PT", "gl": "PT", "ceid": "PT:pt-150"}, "GALP"),
         EuronextSource("IE", "Ireland", "Dublin", ("XMSM", "XESM"), ".IR", "ISE", "en", "Europe/Dublin",
                        {"hl": "en-IE", "gl": "IE", "ceid": "IE:en"}, "KRZ"),
-        EuronextSource("IT", "Italy", "Milan", ("MTAA", "EXGM", "ETLX", "MIVX"), ".MI", "MIL", "it", "Europe/Rome",
+        ItalySource("IT", "Italy", "Milan", ("MTAA", "EXGM", "ETLX", "MIVX"), ".MI", "MIL", "it", "Europe/Rome",
                        {"hl": "it", "gl": "IT", "ceid": "IT:it"}, "ENI"),
     ]

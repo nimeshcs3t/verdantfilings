@@ -267,7 +267,10 @@ def refresh(limit: int = 6) -> int:
                 lei = lei_for(market, ticker, source_id, name)
                 rows = fetch_esef(lei) if lei else []
         except Exception as exc:
-            log.warning("financials failed for %s:%s: %s", market, ticker, exc)
+            if "404" in str(exc):           # no figures published in this format (e.g. foreign shares traded OTC)
+                log.info("no financial figures for %s:%s", market, ticker)
+            else:
+                log.warning("financials failed for %s:%s: %s", market, ticker, exc)
             touch_meta(market, ticker, fin_updated=utcnow() - REFRESH + timedelta(days=1))   # retry tomorrow
             continue
         with get_engine().begin() as conn:

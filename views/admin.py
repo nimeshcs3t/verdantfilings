@@ -119,9 +119,16 @@ def health_panel() -> None:
                  ("New filings, last run", last["stats"].get("new", 0)), ("Alerts, last run", last["stats"].get("alerts", 0))]
         html_block('<div class="stat-grid">' + "".join(f'<div class="stat"><div class="k">{k}</div><div class="v">{esc(v)}</div></div>'
                                                        for k, v in stats) + "</div>")
-        late = utcnow() - as_utc(last["started_at"]) > timedelta(hours=2)
-        if late:
-            st.warning("No background run in the last 2 hours. Check GitHub, then Actions, then Poll filings.")
+        gap = utcnow() - as_utc(last["started_at"])
+        now = utcnow()
+        busy = now.weekday() in (6, 0, 1, 2, 3, 4) and (now.hour >= 23 or now.hour <= 10)   # cron "*/10 23,0-10 * * 0-5" (UTC)
+        allowed = timedelta(hours=1) if busy else timedelta(hours=3)    # every 10 min in busy hours, else hourly
+        if gap > allowed:
+            hours = gap.total_seconds() / 3600
+            st.warning(f"No background run for {hours:.1f} hours (expected {'every 10 minutes' if busy else 'about hourly'}). "
+                       "On GitHub open Actions → Poll filings: if the latest run is red, open it and copy the error; "
+                       "if there are no recent runs, press Run workflow. Billing → Usage shows whether the monthly "
+                       "Actions minutes ran out.")
         warn_runs = [r for r in runs if r["warnings"]][:5]
         if warn_runs:
             with st.expander(f"Recent warnings ({len(warn_runs)} runs)"):

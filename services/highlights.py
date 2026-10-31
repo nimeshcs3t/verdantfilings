@@ -22,6 +22,20 @@ NOTE_TYPES = {
 }
 
 
+def guess_type(title: str) -> str | None:
+    """Document type from a filing title, or None when it isn't clear (the member then chooses)."""
+    t = (title or "").lower()
+    rules = [("concall", r"conference call|earnings call|concall|con-call|transcript|webcast|analyst call"),
+             ("presentation", r"presentation|investor day|capital markets day|slides|roadshow"),
+             ("annual", r"annual report|20-f|10-k|universal registration|integrated report|annual financial report"),
+             ("meeting", r"general meeting|agm|egm|shareholders' meeting|assemblea|annual meeting"),
+             ("results", r"results|earnings|quarter|half[- ]year|interim|10-q|q[1-4]\b|trading update|6-k|8-k")]
+    for kind, pattern in rules:
+        if re.search(pattern, t):
+            return kind
+    return "other" if t else None
+
+
 class DocumentProblem(ValueError):
     """The file can't be read (too big, not a PDF, protected, scanned without text)."""
 

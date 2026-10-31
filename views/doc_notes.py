@@ -34,15 +34,40 @@ def doc_notes(user: dict, key: str, preset: tuple[str, str] | None = None, filin
     if filing:
         preset = (filing["market"], filing["ticker"])
     index = next((i for i, lab in enumerate(labels) if companies[lab] == preset), 0) if preset else 0
-    c1, c2 = st.columns([1.4, 1])
-    company = c1.selectbox("Company", labels, index=index, disabled=bool(preset) and preset in companies.values(),
+    company = st.selectbox("Company", labels, index=index, disabled=bool(preset) and preset in companies.values(),
                            key=f"{k}-co")
-    kind = c2.selectbox("Document", list(hl.NOTE_TYPES), format_func=lambda x: hl.NOTE_TYPES[x][0], key=f"{k}-kind")
+    market, ticker = companies[company]
+
+    # which filing (the company's filings of the last year), or another document such as a call transcript
+    options: dict[str, dict | None] = {"Another document (not a filing here)": None}
+    if market:
+        from datetime import timedelta
+        from services.pipeline import filings_for
+        try:
+            recent = filings_for([(market, ticker)], date.today() - timedelta(days=365), limit=150)
+        except Exception:
+            recent = []
+        for r in recent:
+            options[f"{r['filed_date']:%d %b %Y}  {(r.get('title_en') or r.get('title_local') or '')[:90]}"] = r
+    if filing and not any(o and o.get("uid") == filing.get("uid") for o in options.values()):
+        options[f"{filing['filed_date']:%d %b %Y}  {(filing.get('title_en') or filing.get('title_local') or '')[:90]}"] = filing
+    picked_label = next((lab for lab, o in options.items() if o and filing and o.get("uid") == filing.get("uid")), None)
+    c1, c2 = st.columns([1.6, 1])
+    which = c1.selectbox("Which filing", list(options), key=f"{k}-which-{market}-{ticker}",
+                         index=list(options).index(picked_label) if picked_label else 0,
+                         help="Links the notes to that filing (they show under it). Pick 'Another document' for a "
+                              "call transcript, a presentation from the company's website, and so on.")
+    filing = options[which]
+    guess = hl.guess_type((filing or {}).get("title_en") or (filing or {}).get("title_local") or "")
+    kind_key = f"{k}-kind-{(filing or {}).get('uid', 'none')}"          # a fresh guess when the filing changes
+    kind = c2.selectbox("Document type", list(hl.NOTE_TYPES), format_func=lambda x: hl.NOTE_TYPES[x][0], key=kind_key,
+                        index=list(hl.NOTE_TYPES).index(guess) if guess else None, placeholder="Choose the type",
+                        help="Decides the headings the notes use.")
     if filing and filing.get("url"):
         st.link_button("Download this filing's document", filing["url"], icon=":material/download:")
 
     # 2. the passages
-    up = st.file_uploader("Your PDF (with your highlights)", type=["pdf"], key=f"{k}-file",
+    up = st.file_uploader("Your PDF", type=["pdf"], key=f"{k}-file",
                           help="Highlight in any PDF reader (Acrobat, Edge, Chrome's PDF editor, Preview on Mac, Files or "
                                "Books on iPhone/iPad), save, then upload here. The file is read and then forgotten: only "
                                "the notes you save are kept.")
@@ -55,6 +80,9 @@ def doc_notes(user: dict, key: str, preset: tuple[str, str] | None = None, filin
             st.warning(str(exc))
         except Exception:
             st.warning("This PDF couldn't be read. Try saving it again from your PDF reader, or paste the text instead.")
+
+    if up is not None and doc is not None:
+        translate_box(up, k)
 
     found = doc["highlights"] if doc else []
     t_marks, t_pick, t_paste = st.tabs([f"My highlights ({len(found)})", "Pick passages here", "Paste text"])
@@ -100,8 +128,10 @@ def doc_notes(user: dict, key: str, preset: tuple[str, str] | None = None, filin
     focus = st.text_input("Anything to focus on? (optional)", placeholder="e.g. order intake, margins, capex plans",
                           key=f"{k}-focus")
     company_name = company.rsplit(" (", 1)[0] if companies[company][0] else ""
+    if chosen and not kind:
+        st.caption("Choose the document type above to make notes.")
     if st.button(f"Make notes from {len(chosen)} passage{'s' if len(chosen) != 1 else ''}", type="primary",
-                 disabled=not chosen, key=f"{k}-go", icon=":material/auto_awesome:"):
+                 disabled=not chosen or not kind, key=f"{k}-go", icon=":material/auto_awesome:"):
         from services.summarize import MemberLimit
         try:
             with st.spinner("Writing your notes"):
@@ -112,6 +142,7 @@ def doc_notes(user: dict, key: str, preset: tuple[str, str] | None = None, filin
         st.session_state[f"{k}-notes"] = notes
         st.session_state[f"{k}-items"] = chosen
         st.session_state[f"{k}-by-ai"] = by_ai
+        st.session_state[f"{k}-made-for"] = {"kind": kind, "filing": filing}
 
     notes = st.session_state.get(f"{k}-notes")
     if not notes:
@@ -125,7 +156,11 @@ def doc_notes(user: dict, key: str, preset: tuple[str, str] | None = None, filin
         st.session_state[f"{k}-edit"], st.session_state[f"{k}-edit-src"] = notes, notes
     with st.form(f"{k}-save", border=True):
         c1, c2 = st.columns([2, 1])
-        title = c1.text_input("Title", value=f"{hl.NOTE_TYPES[kind][0].split(' /')[0]} notes, {date.today():%b %Y}")
+        made = st.session_state.get(f"{k}-made-for") or {"kind": kind, "filing": filing}
+        made_filing = made.get("filing")
+        default_title = (f"Notes: {(made_filing.get('title_en') or made_filing.get('title_local') or '')[:150]}"
+                         if made_filing else f"{hl.NOTE_TYPES[made['kind'] or 'other'][0].split(' /')[0]} notes, {date.today():%b %Y}")
+        title = c1.text_input("Title", value=default_title)
         day = c2.date_input("Date", value=date.today(), max_value=date.today())
         body = st.text_area("Notes", key=f"{k}-edit", height=320)
         c3, c4 = st.columns([2, 1])
@@ -135,11 +170,11 @@ def doc_notes(user: dict, key: str, preset: tuple[str, str] | None = None, filin
             market, ticker = companies[company]
             items = st.session_state.get(f"{k}-items") or []
             err = journal.add(uid, market, ticker, day, "notes", title, hl.body_with_quotes(body, items, keep_quotes),
-                              None, tags, None, filing_uid=(filing or {}).get("uid"))
+                              None, tags, None, filing_uid=(made_filing or {}).get("uid"))
             if err:
                 st.warning(err)
             else:
-                for s in (f"{k}-notes", f"{k}-items", f"{k}-edit", f"{k}-edit-src"):
+                for s in (f"{k}-notes", f"{k}-items", f"{k}-edit", f"{k}-edit-src", f"{k}-made-for"):
                     st.session_state.pop(s, None)
                 st.session_state.pop("_doc_cache", None)
                 st.session_state.pop("doc_notes_filing", None)
@@ -147,3 +182,37 @@ def doc_notes(user: dict, key: str, preset: tuple[str, str] | None = None, filin
                 st.rerun()
     with st.expander("Preview"):
         st.markdown(st.session_state.get(f"{k}-edit") or notes)
+
+
+def translate_box(up, k: str) -> None:
+    """Translate the whole uploaded PDF into English, keeping its layout, and offer it for download."""
+    from services import pdf_translate
+    digest = hashlib.sha1(up.getvalue()).hexdigest()
+    done = st.session_state.get(f"{k}-tr")
+    c1, c2 = st.columns([1.3, 2], vertical_alignment="center")
+    if done and done[0] == digest:
+        c1.download_button("Download the English PDF", done[1], file_name=f"{up.name.rsplit('.', 1)[0]} (English).pdf",
+                           mime="application/pdf", icon=":material/download:", type="primary", key=f"{k}-tr-dl")
+        c2.caption(f"Translated {done[2]['blocks']} text blocks on {done[2]['pages']} pages. You can highlight the "
+                   "English copy and upload it here for notes.")
+        return
+    if c1.button("Translate the whole PDF to English", icon=":material/translate:", key=f"{k}-tr-go",
+                 help="Keeps the layout: slides, tables and pictures stay in place, the text is replaced with English. "
+                      "Free machine translation (no AI). Up to 80 pages."):
+        bar = st.progress(0.0, text="Translating")
+        try:
+            data, stats = pdf_translate.translate_pdf(up.getvalue(), "en",
+                                                      progress=lambda f: bar.progress(min(f, 1.0), text="Translating"))
+        except pdf_translate.TranslateProblem as exc:
+            bar.empty()
+            st.warning(str(exc))
+            return
+        except Exception:
+            bar.empty()
+            st.warning("This PDF couldn't be translated. Try again, or save a shorter part of it.")
+            return
+        bar.empty()
+        st.session_state[f"{k}-tr"] = (digest, data, stats)
+        st.rerun()
+    else:
+        c2.caption("Works best for presentations and reports. Scanned pages can't be translated.")

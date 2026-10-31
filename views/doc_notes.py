@@ -67,7 +67,7 @@ def doc_notes(user: dict, key: str, preset: tuple[str, str] | None = None, filin
         st.link_button("Download this filing's document", filing["url"], icon=":material/download:")
 
     # 2. the passages
-    up = st.file_uploader("Your PDF", type=["pdf"], key=f"{k}-file",
+    up = st.file_uploader("Your PDF (with your highlights)", type=["pdf"], key=f"{k}-file",
                           help="Highlight in any PDF reader (Acrobat, Edge, Chrome's PDF editor, Preview on Mac, Files or "
                                "Books on iPhone/iPad), save, then upload here. The file is read and then forgotten: only "
                                "the notes you save are kept.")
@@ -80,9 +80,6 @@ def doc_notes(user: dict, key: str, preset: tuple[str, str] | None = None, filin
             st.warning(str(exc))
         except Exception:
             st.warning("This PDF couldn't be read. Try saving it again from your PDF reader, or paste the text instead.")
-
-    if up is not None and doc is not None:
-        translate_box(up, k)
 
     found = doc["highlights"] if doc else []
     t_marks, t_pick, t_paste = st.tabs([f"My highlights ({len(found)})", "Pick passages here", "Paste text"])
@@ -182,37 +179,3 @@ def doc_notes(user: dict, key: str, preset: tuple[str, str] | None = None, filin
                 st.rerun()
     with st.expander("Preview"):
         st.markdown(st.session_state.get(f"{k}-edit") or notes)
-
-
-def translate_box(up, k: str) -> None:
-    """Translate the whole uploaded PDF into English, keeping its layout, and offer it for download."""
-    from services import pdf_translate
-    digest = hashlib.sha1(up.getvalue()).hexdigest()
-    done = st.session_state.get(f"{k}-tr")
-    c1, c2 = st.columns([1.3, 2], vertical_alignment="center")
-    if done and done[0] == digest:
-        c1.download_button("Download the English PDF", done[1], file_name=f"{up.name.rsplit('.', 1)[0]} (English).pdf",
-                           mime="application/pdf", icon=":material/download:", type="primary", key=f"{k}-tr-dl")
-        c2.caption(f"Translated {done[2]['blocks']} text blocks on {done[2]['pages']} pages. You can highlight the "
-                   "English copy and upload it here for notes.")
-        return
-    if c1.button("Translate the whole PDF to English", icon=":material/translate:", key=f"{k}-tr-go",
-                 help="Keeps the layout: slides, tables and pictures stay in place, the text is replaced with English. "
-                      "Free machine translation (no AI). Up to 80 pages."):
-        bar = st.progress(0.0, text="Translating")
-        try:
-            data, stats = pdf_translate.translate_pdf(up.getvalue(), "en",
-                                                      progress=lambda f: bar.progress(min(f, 1.0), text="Translating"))
-        except pdf_translate.TranslateProblem as exc:
-            bar.empty()
-            st.warning(str(exc))
-            return
-        except Exception:
-            bar.empty()
-            st.warning("This PDF couldn't be translated. Try again, or save a shorter part of it.")
-            return
-        bar.empty()
-        st.session_state[f"{k}-tr"] = (digest, data, stats)
-        st.rerun()
-    else:
-        c2.caption("Works best for presentations and reports. Scanned pages can't be translated.")

@@ -4,7 +4,8 @@ Companies are identified by NIF (tax id). Unofficial, for personal use. Switch o
 
   list    /portal/otra-informacion-relevante/resultado-oir?nif=<NIF>&lang=en&page=<n>   (10 rows a page)
           /portal/informacion-privilegiada/resultado-ip?nif=<NIF>&lang=en&page=<n>
-  recent  same pages with fechaDesde=<DD/MM/YYYY>&fechaHasta=<DD/MM/YYYY> instead of nif (all companies)
+  (there is no market-wide list: the site only shows all companies' filings inside a browser search session)
+  NIF     from GLEIF's open LEI register (registeredAs), or the CNMV's own company-name search, checked on the list
   doc     /webservices/verdocumento/ver?t=<id>  (PDF)"""
 from __future__ import annotations
 
@@ -91,7 +92,6 @@ class CnmvSource(FilingSource):
 
     def __init__(self):
         self.http = PoliteClient("cnmv", pause=1.0, headers={"Referer": f"{BASE}/portal/home.aspx?lang=en"})
-        self._issuers: dict[str, tuple[str, str]] | None = None      # plain name -> (nif, display name)
         self._at, self._lock = 0.0, threading.Lock()
 
     def is_configured(self) -> bool:
@@ -111,76 +111,92 @@ class CnmvSource(FilingSource):
             last = RuntimeError(f"CNMV refused the query ({r.url})")
         raise last
 
-    def _page(self, register: str, days: int | None = None, **params) -> list[dict]:
-        """One page of a register. `days` = everything filed in the last N days (all companies). The CNMV site's
-        parameters for that aren't documented, so several known forms are tried and the one that works is kept."""
-        if days is None:
-            p = {"lang": "en", **params}
-            if p.get("page") == 0:
-                p.pop("page")
-            return parse_register(self._get(register, p), register)
-        today = self.today()
-        frm, to = today - timedelta(days=days), today
-        page = params.pop("page", 0)
-        forms = [
-            {"fechaDesde": f"{frm:%d/%m/%Y}", "fechaHasta": f"{to:%d/%m/%Y}"},
-            {"dias": days},
-            {"fechaInicio": f"{frm:%d/%m/%Y}", "fechaFin": f"{to:%d/%m/%Y}"},
-            {"desde": f"{frm:%d/%m/%Y}", "hasta": f"{to:%d/%m/%Y}"},
-        ]
-        order = ([self._form] if getattr(self, "_form", None) is not None else []) + \
-            [i for i in range(len(forms)) if i != getattr(self, "_form", None)]
-        errors = []
-        for i in order:
-            p = {"lang": "en", **forms[i], **params, **({"page": page} if page else {})}
-            try:
-                rows = parse_register(self._get(register, p), register)
-            except Exception as exc:
-                if exc.__class__.__name__ == "SourceBusy":
-                    raise
-                errors.append(f"{list(forms[i])}: {str(exc)[:80]}")
-                continue
-            self._form = i
-            return rows
-        raise RuntimeError("no date-range form accepted; " + " | ".join(errors))
-
-    def issuers(self) -> dict[str, tuple[str, str]]:
-        """Companies that filed in the last 60 days, by plain name (refreshed daily)."""
-        with self._lock:
-            if self._issuers is None or time.time() - self._at > 86400:
-                found: dict[str, tuple[str, str]] = {}
-                for register in REGISTERS:
-                    for page in range(15):
-                        try:
-                            rows = self._page(register, days=60, page=page)
-                        except Exception as exc:
-                            if exc.__class__.__name__ == "SourceBusy":
-                                raise
-                            log.warning("CNMV issuer list page failed for ES: %s", exc)
-                            break
-                        for r in rows:
-                            if r["nif"] and r["company"]:
-                                found.setdefault(plain_name(r["company"]), (r["nif"], r["company"]))
-                        if len(rows) < 10:
-                            break
-                self._issuers, self._at = found, time.time()
-            return self._issuers
+    def _page(self, register: str, **params) -> list[dict]:
+        """One page of a company's register (nif=..., page=...)."""
+        p = {"lang": "en", **params}
+        if p.get("page") == 0:
+            p.pop("page")
+        return parse_register(self._get(register, p), register)
 
     def normalize_ticker(self, raw: str) -> str | None:
         t = re.sub(r"\.MC$", "", (raw or "").strip().upper())
         return t if re.fullmatch(r"[A-Z0-9][A-Z0-9.\-]{0,9}", t) else None
 
-    def _match(self, name: str) -> tuple[str, str] | None:
+    def _warm(self) -> None:
+        """The CNMV site keeps search state in a session; open the home page once so requests carry its cookies."""
+        if not getattr(self, "_warmed", False):
+            try:
+                self.http.get(f"{BASE}/portal/home.aspx", params={"lang": "en"})
+            except Exception as exc:
+                if exc.__class__.__name__ == "SourceBusy":
+                    raise
+            self._warmed = True
+
+    def _nif_from_gleif(self, name: str) -> list[str]:
+        """Spanish tax ids (NIF) of companies with this name, from GLEIF's open LEI register (registeredAs)."""
+        import requests
         want = plain_name(name)
-        if not want:
+        out = []
+        for params in ({"filter[entity.legalName]": name}, {"filter[fulltext]": want}):
+            try:
+                data = requests.get("https://api.gleif.org/api/v1/lei-records",
+                                    params={**params, "filter[entity.legalAddress.country]": "ES", "page[size]": 8},
+                                    timeout=20).json().get("data", [])
+            except Exception:
+                continue
+            for rec in data:
+                entity = (rec.get("attributes") or {}).get("entity") or {}
+                legal = (entity.get("legalName") or {}).get("name") or ""
+                reg = re.sub(r"[^A-Z0-9]", "", str(entity.get("registeredAs") or "").upper())
+                if not re.fullmatch(r"[A-Z]\d{8}|[A-Z]\d{7}[A-Z0-9]", reg):
+                    continue
+                if plain_name(legal).split()[:1] == want.split()[:1]:
+                    nif = f"{reg[0]}-{reg[1:]}"
+                    if nif not in out:
+                        out.append(nif)
+            if out:
+                break
+        return out
+
+    def _nif_from_search(self, name: str) -> list[str]:
+        """The CNMV's own company-name search (an ASP.NET form): fill the first text box and submit."""
+        from bs4 import BeautifulSoup
+        try:
+            page = self.http.get(f"{BASE}/portal/Consultas/BusquedaPorEntidad", params={"lang": "en"})
+            soup = BeautifulSoup(page.text, "html.parser")
+            form = soup.find("form")
+            if not form:
+                return []
+            data = {i["name"]: i.get("value", "") for i in form.find_all("input", attrs={"type": "hidden"}) if i.get("name")}
+            box = form.find("input", attrs={"type": "text"})
+            button = form.find("input", attrs={"type": "submit"})
+            if not box or not box.get("name"):
+                return []
+            data[box["name"]] = name
+            if button and button.get("name"):
+                data[button["name"]] = button.get("value", "")
+            action = form.get("action") or page.url
+            if action.startswith("/"):
+                action = BASE + action
+            elif not action.startswith("http"):
+                action = page.url
+            r = self.http.post(action, data=data, allow_redirects=True)
+        except Exception as exc:
+            if exc.__class__.__name__ == "SourceBusy":
+                raise
+            return []
+        found = re.findall(r"nif=([A-Z]-?\d{7,8}[A-Z0-9]?)", r.url + " " + r.text, re.I)
+        return list(dict.fromkeys(n.upper() if "-" in n else f"{n[0].upper()}-{n[1:]}" for n in found))[:5]
+
+    def _check(self, nif: str) -> str | None:
+        """The company's name on the CNMV, if this NIF has a filings page there."""
+        try:
+            rows = self._page("oir", nif=nif)
+        except Exception as exc:
+            if exc.__class__.__name__ == "SourceBusy":
+                raise
             return None
-        issuers = self.issuers()
-        if want in issuers:
-            return issuers[want]
-        first = want.split()[0]
-        close = [(k, v) for k, v in issuers.items() if k.startswith(want) or want.startswith(k) or
-                 (len(first) >= 4 and k.split()[:1] == [first])]
-        return min(close, key=lambda kv: abs(len(kv[0]) - len(want)))[1] if close else None
+        return rows[0]["company"] if rows else None
 
     def resolve(self, ticker: str) -> Company | None:
         from services.prices import symbol_details
@@ -188,10 +204,14 @@ class CnmvSource(FilingSource):
         details = symbol_details(f"{t}.MC") if t else None
         if not details:
             return None
-        hit = self._match(details["name"])
-        if not hit:
-            return None
-        return Company(self.market, t, hit[0], hit[1], details["name"])
+        self._warm()
+        name = details["name"]
+        for nif in self._nif_from_gleif(name) + self._nif_from_search(plain_name(name).title()):
+            on_cnmv = self._check(nif)
+            if on_cnmv:
+                return Company(self.market, t, nif, on_cnmv, name)
+        log.warning("CNMV company not found for ES:%s (%s)", t, name)
+        return None
 
     def search(self, query: str, limit: int = 8) -> list[Company]:
         from services.prices import yahoo_search
@@ -216,6 +236,7 @@ class CnmvSource(FilingSource):
                       title_en=title if title.isascii() and not re.search(r"\b(de|la|del|sobre)\b", title) else "")
 
     def list_filings(self, company: Company, start: date, end: date) -> list[Filing]:
+        self._warm()
         if not company.source_id:
             found = self.resolve(company.ticker)
             if not found:
@@ -231,23 +252,8 @@ class CnmvSource(FilingSource):
         return out
 
     def market_feed(self) -> list[dict]:
-        out = []
-        for register in REGISTERS:
-            for page in range(5):
-                try:
-                    rows = self._page(register, days=1, page=page)
-                except Exception as exc:
-                    if exc.__class__.__name__ == "SourceBusy":
-                        raise
-                    log.warning("market-wide list failed for ES (company pages still work): %s", exc)
-                    break
-                for r in rows:
-                    f = self._filing(r, "", r["company"])
-                    out.append({"uid": f.uid, "ticker": "", "company": r["company"], "title_local": f.title_local,
-                                "title_en": f.title_en, "url": f.url, "date": f.filed_date})
-                if len(rows) < 10:
-                    break
-        return out
+        """None: the CNMV only lists all companies' filings inside a browser search session."""
+        return []
 
     def fetch_document_text(self, uid: str) -> str:
         from sqlalchemy import select

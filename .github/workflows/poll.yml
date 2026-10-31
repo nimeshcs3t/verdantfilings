@@ -38,6 +38,13 @@ jobs:
           ENABLE_AMF: ${{ secrets.ENABLE_AMF }}
           ENABLE_UK_NSM: ${{ secrets.ENABLE_UK_NSM }}
           ENABLE_NORDIC: ${{ secrets.ENABLE_NORDIC }}
+          ENABLE_BALTIC: ${{ secrets.ENABLE_BALTIC }}
+          ENABLE_EURONEXT: ${{ secrets.ENABLE_EURONEXT }}
+          ENABLE_CNMV: ${{ secrets.ENABLE_CNMV }}
+          ENABLE_DACH: ${{ secrets.ENABLE_DACH }}
+          ENABLE_OTC: ${{ secrets.ENABLE_OTC }}
+          APP_TIMEZONE: ${{ secrets.APP_TIMEZONE }}
+          AI_PER_MEMBER_PER_DAY: ${{ secrets.AI_PER_MEMBER_PER_DAY }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}

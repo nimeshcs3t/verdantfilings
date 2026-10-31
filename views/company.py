@@ -60,8 +60,16 @@ def page() -> None:
             if home:
                 st.caption(f"{ticker} is linked to {home[2]} ({home[1]}, {get_source(home[0]).country}); "
                            "showing the home listing's filings.")
+                if watch.is_watching(user["id"], market, ticker):      # follow the home listing from now on
+                    watch.replace(user, (market, ticker), (home[0], home[1]))
                 market, ticker = home[0], home[1]
                 st.session_state["company_sel"] = (market, ticker)
+            else:
+                h_market, h_ticker = manual(ticker)
+                h_src = get_source(h_market)
+                why = ("that market isn't switched on in the app's secrets" if not (h_src and h_src.is_configured())
+                       else f"{h_ticker} couldn't be found on {h_src.regulator} just now")
+                st.warning(f"{ticker} is linked to {h_ticker} ({h_market}), but {why}. Showing the US listing for now.")
     src = get_source(market)
     with st.spinner("Loading company"):
         try:

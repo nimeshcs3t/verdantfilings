@@ -21,6 +21,7 @@ def page() -> None:
     page_header("Admin", "Health, sources, members, plans and data.")
     health_panel()
     sources_panel()
+    links_panel(me)
 
     with get_engine().connect() as conn:
         counts = {name: conn.execute(select(func.count()).select_from(t)).scalar_one()
@@ -165,6 +166,30 @@ def health_panel() -> None:
 
 STATE = {"ok": ("●", "var(--up)", "Working"), "warning": ("●", "var(--amber)", "Recent error"),
          "problem": ("●", "var(--down)", "Not updating"), "paused": ("●", "var(--amber)", "Paused"), "idle": ("○", "var(--muted)", "No companies")}
+
+
+def links_panel(me: dict) -> None:
+    """US / OTC symbols that should show a home-market listing's filings (e.g. AVVSY -> AVIO in Milan)."""
+    from services import home_listing
+    with st.expander("Linked listings (US / OTC line to home market)", icon=":material/link:"):
+        st.caption("Following or opening the US symbol shows the home listing's filings instead. Foreign OTC lines "
+                   "are matched automatically when the names agree; add a link here when they don't.")
+        with st.form("link-add", clear_on_submit=True, border=False):
+            c1, c2, c3 = st.columns([1, 1.4, 0.7], vertical_alignment="bottom")
+            sym = c1.text_input("US / OTC symbol", placeholder="AVVSY")
+            target = c2.text_input("Home listing", placeholder="AVIO.MI or IT:AVIO")
+            if c3.form_submit_button("Link", width="stretch") and sym.strip():
+                with st.spinner("Checking the home listing"):
+                    err = home_listing.set_link(sym, target, me["id"])
+                st.warning(err) if err else st.success(f"Linked {sym.strip().upper()}.")
+        for link in home_listing.links():
+            c1, c2 = st.columns([4, 1], vertical_alignment="center")
+            c1.markdown(f'**{esc(link["symbol"])}** to {esc(link["ticker"])} '
+                        f'<span class="fl-tk">{esc(link["market"])}</span>'
+                        + (' <span class="fl-tk">built in</span>' if link.get("built_in") else ""), unsafe_allow_html=True)
+            if not link.get("built_in") and c2.button("Remove", key=f"unlink-{link['symbol']}", type="tertiary"):
+                home_listing.remove_link(link["symbol"])
+                st.rerun()
 
 
 def sources_panel() -> None:

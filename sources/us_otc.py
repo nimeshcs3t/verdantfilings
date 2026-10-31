@@ -155,15 +155,58 @@ class OtcSource(FilingSource):
                             "url": item.get("link") or ""})
         return out
 
+    def _home_filings(self, company: Company, start: date, end: date) -> list[Filing]:
+        """A foreign company's filings from its home listing, shown under the OTC symbol too.
+        Stored as OT:@<home uid> so they don't clash with the same filing under the home company."""
+        from services.home_listing import find
+        from sources import get_source
+        try:
+            home = find(company.ticker, company.name_en)
+        except Exception:
+            home = None
+        src = get_source(home[0]) if home else None
+        if not src or not src.is_configured():
+            return []
+        try:
+            home_comp = src.resolve(home[1])
+            items = src.list_filings(home_comp, start, end) if home_comp else []
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("home filings failed for OT:%s via %s:%s: %s", company.ticker, home[0], home[1], exc)
+            return []
+        return [Filing(uid=f"OT:@{f.uid}"[:64], market=self.market, ticker=company.ticker, company_name=company.name_en,
+                       filed_date=f.filed_date, title_local=f.title_local, filer=f"{src.country}: {f.filer}".strip(": "),
+                       url=f.url, title_en=f.title_en, price_sensitive=f.price_sensitive) for f in items]
+
     def list_filings(self, company: Company, start: date, end: date) -> list[Filing]:
         items = self._news(company.ticker)
         if not items:
             items = self._wire_news(company, start, end)
-        return [Filing(uid=i["uid"], market=self.market, ticker=company.ticker, company_name=company.name_en,
-                       filed_date=i["date"], title_local=i["title"], filer=i["kind"], url=i["url"], title_en=i["title"])
-                for i in items if start <= i["date"] <= end]
+        own = [Filing(uid=i["uid"], market=self.market, ticker=company.ticker, company_name=company.name_en,
+                      filed_date=i["date"], title_local=i["title"], filer=i["kind"], url=i["url"], title_en=i["title"])
+               for i in items if start <= i["date"] <= end]
+        return own + self._home_filings(company, start, end)
 
     def fetch_document_text(self, uid: str) -> str:
+        if uid.startswith("OT:@"):                  # a home-market filing: read it the way its own source does
+            from sources import get_source
+            inner = uid[4:]
+            src = get_source(inner.split(":", 1)[0])
+            text = ""
+            if src:
+                try:
+                    text = src.fetch_document_text(inner)
+                except Exception:
+                    text = ""
+            if not text:
+                from sqlalchemy import select
+                from core.db import filings, get_engine
+                with get_engine().connect() as conn:
+                    url = conn.execute(select(filings.c.url).where(filings.c.uid == uid)).scalar()
+                if url:
+                    r = self.http.get(url) if "otcmarkets" in url else __import__("requests").get(url, timeout=30)
+                    text = any_text(r.content, r.headers.get("content-type") or "")
+            return text
         kind, rid = uid.split(":", 1)[1][:1], uid.split(":", 1)[1][1:]
         if kind == "r":
             r = self.http.get(f"{API}/company/financial-report/{rid}/content")

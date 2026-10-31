@@ -50,6 +50,18 @@ def page() -> None:
         return
 
     market, ticker = sel
+    if market in ("US", "OT"):                # a linked US / OTC line: show the home listing's filings instead
+        from services.home_listing import home_of, manual
+        if manual(ticker):
+            try:
+                home = home_of(market, ticker)
+            except Exception:
+                home = None
+            if home:
+                st.caption(f"{ticker} is linked to {home[2]} ({home[1]}, {get_source(home[0]).country}); "
+                           "showing the home listing's filings.")
+                market, ticker = home[0], home[1]
+                st.session_state["company_sel"] = (market, ticker)
     src = get_source(market)
     with st.spinner("Loading company"):
         try:

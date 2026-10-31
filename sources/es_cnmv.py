@@ -97,14 +97,52 @@ class CnmvSource(FilingSource):
     def is_configured(self) -> bool:
         return str(get_secret("ENABLE_CNMV", "false")).lower() in {"1", "true", "yes"}
 
+    def _get(self, register: str, params: dict) -> str:
+        """GET a register page. The site answers bad parameters with a redirect to /portal/Error?errorcode=HE."""
+        import requests
+        for path in (BASE + REGISTERS[register], BASE + REGISTERS[register] + ".aspx"):
+            try:
+                r = self.http.get(path, params=params, allow_redirects=True)
+            except requests.HTTPError as exc:
+                last = exc
+                continue
+            if "/Error" not in r.url:
+                return r.text
+            last = RuntimeError(f"CNMV refused the query ({r.url})")
+        raise last
+
     def _page(self, register: str, days: int | None = None, **params) -> list[dict]:
-        """One page of a register. `days` asks for everything filed in the last N days (all companies); the CNMV
-        wants that as a date range (fechaDesde / fechaHasta, DD/MM/YYYY), not as a number of days."""
-        if days is not None:
-            today = self.today()
-            params = {"fechaDesde": f"{today - timedelta(days=days):%d/%m/%Y}", "fechaHasta": f"{today:%d/%m/%Y}", **params}
-        r = self.http.get(BASE + REGISTERS[register], params={"lang": "en", **params}, allow_redirects=True)
-        return parse_register(r.text, register)
+        """One page of a register. `days` = everything filed in the last N days (all companies). The CNMV site's
+        parameters for that aren't documented, so several known forms are tried and the one that works is kept."""
+        if days is None:
+            p = {"lang": "en", **params}
+            if p.get("page") == 0:
+                p.pop("page")
+            return parse_register(self._get(register, p), register)
+        today = self.today()
+        frm, to = today - timedelta(days=days), today
+        page = params.pop("page", 0)
+        forms = [
+            {"fechaDesde": f"{frm:%d/%m/%Y}", "fechaHasta": f"{to:%d/%m/%Y}"},
+            {"dias": days},
+            {"fechaInicio": f"{frm:%d/%m/%Y}", "fechaFin": f"{to:%d/%m/%Y}"},
+            {"desde": f"{frm:%d/%m/%Y}", "hasta": f"{to:%d/%m/%Y}"},
+        ]
+        order = ([self._form] if getattr(self, "_form", None) is not None else []) + \
+            [i for i in range(len(forms)) if i != getattr(self, "_form", None)]
+        errors = []
+        for i in order:
+            p = {"lang": "en", **forms[i], **params, **({"page": page} if page else {})}
+            try:
+                rows = parse_register(self._get(register, p), register)
+            except Exception as exc:
+                if exc.__class__.__name__ == "SourceBusy":
+                    raise
+                errors.append(f"{list(forms[i])}: {str(exc)[:80]}")
+                continue
+            self._form = i
+            return rows
+        raise RuntimeError("no date-range form accepted; " + " | ".join(errors))
 
     def issuers(self) -> dict[str, tuple[str, str]]:
         """Companies that filed in the last 60 days, by plain name (refreshed daily)."""
@@ -196,7 +234,13 @@ class CnmvSource(FilingSource):
         out = []
         for register in REGISTERS:
             for page in range(5):
-                rows = self._page(register, days=1, page=page)
+                try:
+                    rows = self._page(register, days=1, page=page)
+                except Exception as exc:
+                    if exc.__class__.__name__ == "SourceBusy":
+                        raise
+                    log.warning("market-wide list failed for ES (company pages still work): %s", exc)
+                    break
                 for r in rows:
                     f = self._filing(r, "", r["company"])
                     out.append({"uid": f.uid, "ticker": "", "company": r["company"], "title_local": f.title_local,

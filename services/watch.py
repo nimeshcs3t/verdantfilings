@@ -35,6 +35,13 @@ def add(user: dict, market: str, ticker: str) -> tuple[dict | None, str | None]:
     limit = watchlist_limit(user["plan"])
     if count >= limit:
         return None, f"Your plan allows {limit} companies. Remove one to add another."
+    try:                                        # a US / OTC line of a foreign company: follow its home listing
+        from .home_listing import home_of
+        home = home_of(market, ticker)
+    except Exception:
+        home = None
+    if home:
+        market, ticker = home[0], home[1]
     comp = get_company(market, ticker)
     if comp is None:
         from sources import get_source

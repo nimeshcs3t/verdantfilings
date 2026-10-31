@@ -34,11 +34,113 @@ def _words(name: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", (name or "").lower()) if w not in stop and len(w) > 1}
 
 
+# links set by hand always win over the automatic search (admins add more on the Admin page)
+BUILT_IN = {"AVVSY": ("IT", "AVIO")}
+SUFFIX_MARKET = {suffix: market for market, suffix in YAHOO_EXCHANGE.values()}
+
+
+def parse_target(text: str) -> tuple[str, str] | None:
+    """'AVIO.MI' (Yahoo style) or 'IT:AVIO' / 'IT AVIO' -> ('IT', 'AVIO')."""
+    t = (text or "").strip().upper()
+    m = re.fullmatch(r"([A-Z]{2})[:\s]+([A-Z0-9.\-]+)", t)
+    if m:
+        return m[1], m[2]
+    for suffix in sorted(SUFFIX_MARKET, key=len, reverse=True):
+        if t.endswith(suffix.upper()) and len(t) > len(suffix):
+            return SUFFIX_MARKET[suffix], t[:-len(suffix)]
+    return None
+
+
+def manual(symbol: str) -> tuple[str, str] | None:
+    """A link set by hand (or built in) for this symbol."""
+    sym = (symbol or "").strip().upper()
+    try:
+        from sqlalchemy import select
+        from core.db import get_engine, listing_links
+        with get_engine().connect() as conn:
+            row = conn.execute(select(listing_links.c.market, listing_links.c.ticker)
+                               .where(listing_links.c.symbol == sym)).first()
+        if row:
+            return row[0], row[1]
+    except Exception:
+        pass
+    return BUILT_IN.get(sym)
+
+
+def links() -> list[dict]:
+    from sqlalchemy import select
+    from core.db import get_engine, listing_links
+    with get_engine().connect() as conn:
+        rows = [dict(r) for r in conn.execute(select(listing_links).order_by(listing_links.c.symbol)).mappings()]
+    have = {r["symbol"] for r in rows}
+    return rows + [{"symbol": k, "market": m, "ticker": t, "built_in": True} for k, (m, t) in BUILT_IN.items() if k not in have]
+
+
+def set_link(symbol: str, target: str, user_id: int | None = None) -> str | None:
+    """Link a US / OTC symbol to a home listing. Returns an error message, or None when saved."""
+    from sqlalchemy import delete, insert
+    from core.db import get_engine, listing_links, utcnow
+    from sources import get_source
+    from .pipeline import get_company
+    sym = re.sub(r"^(OTC|PNK|US)[:\s]+", "", (symbol or "").strip().upper())
+    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", sym):
+        return "Enter the US or OTC symbol, e.g. AVVSY."
+    parsed = parse_target(target)
+    if not parsed:
+        return "Enter the home listing as a Yahoo symbol (AVIO.MI) or market and ticker (IT:AVIO)."
+    market, ticker = parsed
+    src = get_source(market)
+    if not src or not src.is_configured():
+        return f"The app doesn't read market {market} at the moment."
+    comp = get_company(market, src.normalize_ticker(ticker) or ticker)
+    if not comp:
+        return f"Couldn't find {ticker} on {src.country}'s source."
+    with get_engine().begin() as conn:
+        conn.execute(delete(listing_links).where(listing_links.c.symbol == sym))
+        conn.execute(insert(listing_links).values(symbol=sym, market=market, ticker=comp["ticker"], added_by=user_id,
+                                                  created_at=utcnow()))
+    find.cache_clear()
+    return None
+
+
+def remove_link(symbol: str) -> None:
+    from sqlalchemy import delete
+    from core.db import get_engine, listing_links
+    with get_engine().begin() as conn:
+        conn.execute(delete(listing_links).where(listing_links.c.symbol == (symbol or "").upper()))
+    find.cache_clear()
+
+
+def home_of(market: str, ticker: str) -> tuple[str, str, str] | None:
+    """The home listing to use instead of a US / OTC / any-market symbol: a hand-set link for any of them, the
+    automatic search for OTC lines. (market, ticker, name) or None."""
+    if market not in ("US", "OT", "X"):
+        return None
+    link = manual(ticker)
+    if link:
+        from sources import get_source
+        src = get_source(link[0])
+        if src and src.is_configured():
+            from .pipeline import get_company
+            comp = get_company(link[0], link[1], resolve=True)
+            return (link[0], comp["ticker"], comp["name_en"]) if comp else None
+        return None
+    return find(ticker) if market == "OT" else None
+
+
 @lru_cache(maxsize=512)
 def find(symbol: str, name_hint: str = "") -> tuple[str, str, str] | None:
     """(market, ticker, name) of the home listing of a US OTC symbol, on a market the app has, or None."""
     from sources import configured_sources, get_source
     from .prices import symbol_details, yahoo_search
+    link = manual(symbol)
+    if link:                                    # set by hand: trust it
+        src = get_source(link[0])
+        if src and src.is_configured():
+            from .pipeline import get_company
+            comp = get_company(link[0], link[1])
+            if comp:
+                return link[0], comp["ticker"], comp["name_en"]
     name = name_hint or (symbol_details(symbol) or {}).get("name") or ""
     query = plain(name)
     if not query:

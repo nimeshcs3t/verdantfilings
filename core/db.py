@@ -617,6 +617,15 @@ company_groups = Table(
     Index("ix_company_groups_user", "user_id"),
 )
 
+listing_links = Table(
+    "listing_links", metadata,              # a US / OTC symbol and the home-market listing whose filings it should show
+    Column("symbol", String(16), primary_key=True),     # e.g. AVVSY
+    Column("market", String(8), nullable=False),        # e.g. IT
+    Column("ticker", String(16), nullable=False),       # e.g. AVIO
+    Column("added_by", Integer),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+)
+
 # Columns added after a table first existed: (table, column, SQL type). Added on start-up if missing.
 UPGRADES = [("journal", "target_price", "FLOAT"), ("company_meta", "shares", "FLOAT"),
             ("users", "totp_secret", "VARCHAR(64)"), ("users", "totp_last_step", "INTEGER"), ("users", "backup_codes", "TEXT"),

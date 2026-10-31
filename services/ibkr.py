@@ -101,6 +101,8 @@ def resolve(currency: str, symbol: str, resolver, configured: set[str]) -> tuple
     sym = symbol.strip().upper()
     base = re.sub(r"\.(KQ|KS)$", "", sym)
     markets = [CURRENCY_MARKET[currency]] if currency in CURRENCY_MARKET else (EUR_MARKETS if currency == "EUR" else [])
+    if currency == "USD":
+        markets.append("OT")             # US over-the-counter shares that don't report to the SEC (ADRs, F-shares)
     for market in markets:
         if market not in configured:
             continue

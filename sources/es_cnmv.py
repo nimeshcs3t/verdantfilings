@@ -4,11 +4,12 @@ Companies are identified by NIF (tax id). Unofficial, for personal use. Switch o
 
   list    /portal/otra-informacion-relevante/resultado-oir?nif=<NIF>&lang=en&page=<n>   (10 rows a page)
           /portal/informacion-privilegiada/resultado-ip?nif=<NIF>&lang=en&page=<n>
-  recent  same pages with dias=<days> instead of nif (all companies)
+  recent  same pages with fechaDesde=<DD/MM/YYYY>&fechaHasta=<DD/MM/YYYY> instead of nif (all companies)
   doc     /webservices/verdocumento/ver?t=<id>  (PDF)"""
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import threading
 import time
@@ -20,6 +21,8 @@ from core.config import get_secret
 from .base import Company, Filing, FilingSource
 from .doctext import any_text
 from .webhttp import PoliteClient
+
+log = logging.getLogger(__name__)
 
 BASE = "https://www.cnmv.es"
 REGISTERS = {"oir": "/portal/otra-informacion-relevante/resultado-oir", "ip": "/portal/informacion-privilegiada/resultado-ip"}
@@ -94,7 +97,12 @@ class CnmvSource(FilingSource):
     def is_configured(self) -> bool:
         return str(get_secret("ENABLE_CNMV", "false")).lower() in {"1", "true", "yes"}
 
-    def _page(self, register: str, **params) -> list[dict]:
+    def _page(self, register: str, days: int | None = None, **params) -> list[dict]:
+        """One page of a register. `days` asks for everything filed in the last N days (all companies); the CNMV
+        wants that as a date range (fechaDesde / fechaHasta, DD/MM/YYYY), not as a number of days."""
+        if days is not None:
+            today = self.today()
+            params = {"fechaDesde": f"{today - timedelta(days=days):%d/%m/%Y}", "fechaHasta": f"{today:%d/%m/%Y}", **params}
         r = self.http.get(BASE + REGISTERS[register], params={"lang": "en", **params}, allow_redirects=True)
         return parse_register(r.text, register)
 
@@ -105,7 +113,13 @@ class CnmvSource(FilingSource):
                 found: dict[str, tuple[str, str]] = {}
                 for register in REGISTERS:
                     for page in range(15):
-                        rows = self._page(register, dias=60, page=page)
+                        try:
+                            rows = self._page(register, days=60, page=page)
+                        except Exception as exc:
+                            if exc.__class__.__name__ == "SourceBusy":
+                                raise
+                            log.warning("CNMV issuer list page failed for ES: %s", exc)
+                            break
                         for r in rows:
                             if r["nif"] and r["company"]:
                                 found.setdefault(plain_name(r["company"]), (r["nif"], r["company"]))
@@ -182,7 +196,7 @@ class CnmvSource(FilingSource):
         out = []
         for register in REGISTERS:
             for page in range(5):
-                rows = self._page(register, dias=1, page=page)
+                rows = self._page(register, days=1, page=page)
                 for r in rows:
                     f = self._filing(r, "", r["company"])
                     out.append({"uid": f.uid, "ticker": "", "company": r["company"], "title_local": f.title_local,

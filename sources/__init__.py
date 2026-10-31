@@ -22,6 +22,10 @@ from .jp_edinet import EdinetSource
 from .kr_dart import DartSource
 from .pl_newconnect import NewConnectSource
 from .us_edgar import EdgarSource
+from .euronext import euronext_sources
+from .es_cnmv import CnmvSource
+from .newswire import wire_sources
+from .us_otc import OtcSource
 
 _REGISTRY: dict[str, FilingSource] = {}
 
@@ -66,3 +70,7 @@ try:
 except Exception:
     register(MayaWebSource())
 register(EdinetSource())
+for _src in euronext_sources() + wire_sources():
+    register(_src)
+register(CnmvSource())
+register(OtcSource())

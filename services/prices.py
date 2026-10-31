@@ -11,7 +11,9 @@ import requests
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                          "Chrome/140.0.0.0 Safari/537.36"}
 SUFFIX = {"KR": [".KS", ".KQ"], "US": [""], "AU": [".AX"], "JP": [".T"], "PL": [".WA"], "IL": [".TA"], "HK": [".HK"],
-          "NO": [".OL"], "TW": [".TW", ".TWO"], "UK": [".L"], "SE": [".ST"], "DK": [".CO"], "FI": [".HE"]}
+          "NO": [".OL"], "TW": [".TW", ".TWO"], "UK": [".L"], "SE": [".ST"], "DK": [".CO"], "FI": [".HE"],
+          "IS": [".IC"], "EE": [".TL"], "LV": [".RG"], "LT": [".VS"], "NL": [".AS"], "BE": [".BR"], "PT": [".LS"],
+          "IE": [".IR"], "IT": [".MI"], "ES": [".MC"], "DE": [".DE", ".F"], "AT": [".VI"], "CH": [".SW"], "OT": [""]}
 MINOR = {"GBp", "GBX", "ILA", "ZAc"}       # prices quoted in pence / agorot / cents
 STOOQ = {"US": ".us", "JP": ".jp", "PL": ""}
 

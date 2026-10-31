@@ -21,7 +21,11 @@ FIELDS = {
 MARKETS = {"US": ["US", "USA", "NASDAQ", "NYSE", "AMEX", "ARCA", "BATS", "NMS", "NYQ"],
            "KR": ["KR", "KRX", "KOSPI", "KOSDAQ", "KSE", "KOREA"],
            "AU": ["AU", "ASX", "AUS", "AUSTRALIA"], "PL": ["PL", "WSE", "GPW", "NEWCONNECT", "POLAND"],
-           "JP": ["JP", "TSE", "TYO", "JPX", "JAPAN"], "IL": ["IL", "TASE", "TLV", "ISRAEL"]}
+           "JP": ["JP", "TSE", "TYO", "JPX", "JAPAN"], "IL": ["IL", "TASE", "TLV", "ISRAEL"],
+           "DE": ["XETRA", "IBIS", "FWB", "GERMANY", "XETR"], "NL": ["AEB", "AMS", "XAMS", "NETHERLANDS"],
+           "ES": ["BM", "BME", "MCE", "XMAD", "SPAIN"], "CH": ["SWX", "EBS", "XSWX", "VIRTX", "SWITZERLAND"],
+           "IT": ["BVME", "MIL", "XMIL", "ITALY"], "BE": ["ENEXT.BE", "XBRU", "BELGIUM"], "AT": ["VSE", "XWBO", "AUSTRIA"],
+           "OT": ["PINK", "OTC", "OTCQX", "OTCQB", "PNK"]}
 BUY_WORDS = ("buy", "bought", "purchase", "b", "long", "acquire")
 SELL_WORDS = ("sell", "sold", "sale", "s", "short", "dispose")
 

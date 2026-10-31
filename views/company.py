@@ -102,6 +102,19 @@ def page() -> None:
         b3.link_button("Find website", "https://www.google.com/search?q=" + quote_plus(f'{comp["name_en"]} official website'),
                        width="stretch", icon=":material/travel_explore:")
 
+    if market == "OT":                       # foreign shares traded OTC: their filings are in the home market
+        from services.home_listing import find as home_listing
+        try:
+            home = home_listing(comp["ticker"], comp["name_en"])
+        except Exception:
+            home = None
+        if home:
+            h_market, h_ticker, h_name = home
+            h1, h2 = st.columns([3, 1], vertical_alignment="center")
+            h1.caption(f"{comp['ticker']} is the US over-the-counter line of {h_name}, which files in "
+                       f"{get_source(h_market).country}. Its official filings are on the home listing.")
+            h2.button(f"Open {h_ticker} ({get_source(h_market).country})", key="co-home", width="stretch",
+                      on_click=_pick, args=(h_market, h_ticker))
     from services import groups as groups_svc
     from core.ui import groups_html
     from .components import group_picker

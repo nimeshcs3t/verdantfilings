@@ -11,14 +11,14 @@ import re
 from datetime import date, datetime
 
 CURRENCY_MARKET = {"USD": "US", "AUD": "AU", "KRW": "KR", "ILS": "IL", "JPY": "JP", "HKD": "HK", "PLN": "PL",
-                   "NOK": "NO", "SEK": "SE", "DKK": "DK", "TWD": "TW", "GBP": "UK"}
+                   "NOK": "NO", "SEK": "SE", "DKK": "DK", "TWD": "TW", "GBP": "UK", "CHF": "CH", "ISK": "IS"}
 # Yahoo Finance suffixes to try for currencies the app has no filings source for (or several exchanges share)
 YAHOO_SUFFIXES = {"EUR": [".PA", ".DE", ".AS", ".MI", ".BR", ".MC", ".LS", ".HE", ".IR", ".VI"], "SGD": [".SI"],
                   "CAD": [".TO", ".V", ".NE"], "CHF": [".SW"], "INR": [".NS", ".BO"], "GBP": [".L"], "ZAR": [".JO"],
                   "MXN": [".MX"], "BRL": [".SA"], "NZD": [".NZ"], "CNH": [".HK"], "HKD": [".HK"], "SEK": [".ST"],
                   "NOK": [".OL"], "DKK": [".CO"], "PLN": [".WA"], "JPY": [".T"], "AUD": [".AX"], "ILS": [".TA"],
                   "KRW": [".KS", ".KQ"], "TWD": [".TW", ".TWO"], "USD": [""]}
-EUR_MARKETS = ["FR", "FI"]          # euro markets with a filings source in the app
+EUR_MARKETS = ["FR", "DE", "NL", "IT", "ES", "BE", "FI", "AT", "PT", "IE", "EE", "LT", "LV"]   # euro markets with a source
 
 
 def _rows(file_bytes: bytes) -> list[list[str]]:

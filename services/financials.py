@@ -15,9 +15,11 @@ from sources import get_source
 
 log = logging.getLogger(__name__)
 REFRESH = timedelta(days=7)
-SUPPORTED = {"KR", "US", "TW", "FR", "UK", "NO", "SE", "DK", "FI"}
-ESEF = {"FR", "UK", "NO", "SE", "DK", "FI"}       # annual reports in the EU/UK digital format (filings.xbrl.org)
-ESEF_COUNTRY = {"NO": "NO", "SE": "SE", "DK": "DK", "FI": "FI", "UK": "GB", "FR": "FR"}
+ESEF_COUNTRY = {"NO": "NO", "SE": "SE", "DK": "DK", "FI": "FI", "UK": "GB", "FR": "FR", "IS": "IS", "EE": "EE",
+                "LV": "LV", "LT": "LT", "NL": "NL", "BE": "BE", "PT": "PT", "IE": "IE", "IT": "IT", "ES": "ES",
+                "DE": "DE", "AT": "AT"}
+ESEF = set(ESEF_COUNTRY)                          # annual reports in the EU/UK digital format (filings.xbrl.org)
+SUPPORTED = {"KR", "US", "TW"} | ESEF
 TW_SETS = ("ci", "basi", "bd", "fh", "ins", "mim")  # TWSE income statements by industry format
 TW_FIELDS = {"revenue": ("營業收入", "收益合計", "淨收益", "收入合計"), "op_income": ("營業利益（損失）",),
              "net_income": ("本期淨利（淨損）", "本期稅後淨利（淨損）")}

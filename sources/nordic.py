@@ -32,10 +32,15 @@ class NordicSource(FilingSource):
     _http = None
 
     def __init__(self, market: str, country: str, city: str, suffix: str, exchange: str, lang: str, tz: str,
-                 news: dict):
+                 news: dict, group: str = "NordicAllMarkets", flag: str = "ENABLE_NORDIC"):
         self.market, self.country, self.city, self.suffix, self.exchange = market, country, city, suffix, exchange
         self.source_lang, self.timezone, self.news_local = lang, tz, news
-        self.ticker_hint = f"{city} ticker, e.g. " + {"SE": "VOLV-B", "DK": "NOVO-B", "FI": "NOKIA"}[market]
+        self.group, self.flag = group, flag
+        if group != "NordicAllMarkets":
+            self.regulator = "Nasdaq Baltic"
+            self.attribution = "Source: Nasdaq Baltic company news (personal use)"
+        self.ticker_hint = f"{city} ticker, e.g. " + {"SE": "VOLV-B", "DK": "NOVO-B", "FI": "NOKIA", "IS": "MAREL",
+                                                      "EE": "LHV1T", "LV": "GRD1R", "LT": "TEL1L"}[market]
 
     @property
     def http(self) -> PoliteClient:
@@ -45,7 +50,7 @@ class NordicSource(FilingSource):
         return NordicSource._http
 
     def is_configured(self) -> bool:
-        return str(get_secret("ENABLE_NORDIC", "false")).lower() in {"1", "true", "yes"}
+        return str(get_secret(self.flag, "false")).lower() in {"1", "true", "yes"}
 
     def all_listed(self) -> list[Company]:
         return []
@@ -76,9 +81,17 @@ class NordicSource(FilingSource):
         return [("Nasdaq Nordic news", "https://www.nasdaq.com/european-market-activity/news/company-news")]
 
     def _query(self, **params) -> list[dict]:
-        r = self.http.get(NEWS, params={**BASE_PARAMS, "limit": 100, "freeText": "", "company": "", "fromDate": "",
-                                        "toDate": "", **params})
-        return ((r.json().get("results") or {}).get("item")) or []
+        base = {**BASE_PARAMS, "limit": 100, "freeText": "", "company": "", "fromDate": "", "toDate": ""}
+        groups = [self.group] if self.group == "NordicAllMarkets" else \
+            [g for g in (getattr(NordicSource, "_baltic_group", None), self.group, "NordicAllMarkets") if g]
+        for group in dict.fromkeys(groups):     # the Baltic group name isn't documented: use the first that answers
+            r = self.http.get(NEWS, params={**base, "globalName": group, **params})
+            items = ((r.json().get("results") or {}).get("item")) or []
+            if items or group == groups[-1]:
+                if items and self.group != "NordicAllMarkets":
+                    NordicSource._baltic_group = group
+                return items
+        return []
 
     def _items(self, company: Company, start: date, end: date) -> list[dict]:
         dates = {"fromDate": f"{start}", "toDate": f"{end}"}
@@ -136,4 +149,11 @@ class NordicSource(FilingSource):
 def nordic_sources() -> list[NordicSource]:
     return [NordicSource("SE", "Sweden", "Stockholm", ".ST", "STO", "sv", "Europe/Stockholm", {"hl": "sv", "gl": "SE", "ceid": "SE:sv"}),
             NordicSource("DK", "Denmark", "Copenhagen", ".CO", "CPH", "da", "Europe/Copenhagen", {"hl": "da", "gl": "DK", "ceid": "DK:da"}),
-            NordicSource("FI", "Finland", "Helsinki", ".HE", "HEL", "fi", "Europe/Helsinki", {"hl": "fi", "gl": "FI", "ceid": "FI:fi"})]
+            NordicSource("FI", "Finland", "Helsinki", ".HE", "HEL", "fi", "Europe/Helsinki", {"hl": "fi", "gl": "FI", "ceid": "FI:fi"}),
+            NordicSource("IS", "Iceland", "Iceland", ".IC", "ICE", "is", "Atlantic/Reykjavik", {"hl": "is", "gl": "IS", "ceid": "IS:is"}),
+            NordicSource("EE", "Estonia", "Tallinn", ".TL", "TAL", "et", "Europe/Tallinn", {"hl": "et", "gl": "EE", "ceid": "EE:et"},
+                         "BalticAllMarkets", "ENABLE_BALTIC"),
+            NordicSource("LV", "Latvia", "Riga", ".RG", "RIS", "lv", "Europe/Riga", {"hl": "lv", "gl": "LV", "ceid": "LV:lv"},
+                         "BalticAllMarkets", "ENABLE_BALTIC"),
+            NordicSource("LT", "Lithuania", "Vilnius", ".VS", "LIT", "lt", "Europe/Vilnius", {"hl": "lt", "gl": "LT", "ceid": "LT:lt"},
+                         "BalticAllMarkets", "ENABLE_BALTIC")]

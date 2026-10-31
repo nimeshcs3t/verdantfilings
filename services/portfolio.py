@@ -15,7 +15,9 @@ from . import prices
 
 log = logging.getLogger(__name__)
 CURRENCY = {"KR": "KRW", "US": "USD", "AU": "AUD", "PL": "PLN", "JP": "JPY", "IL": "ILS", "HK": "HKD", "NO": "NOK",
-            "TW": "TWD", "FR": "EUR", "UK": "GBP", "SE": "SEK", "DK": "DKK", "FI": "EUR"}
+            "TW": "TWD", "FR": "EUR", "UK": "GBP", "SE": "SEK", "DK": "DKK", "FI": "EUR",
+            "IS": "ISK", "EE": "EUR", "LV": "EUR", "LT": "EUR", "NL": "EUR", "BE": "EUR", "PT": "EUR", "IE": "EUR",
+            "IT": "EUR", "ES": "EUR", "DE": "EUR", "AT": "EUR", "CH": "CHF", "OT": "USD"}
 KINDS = {"move": "Daily move of at least", "above": "Price rises above", "below": "Price falls below"}
 
 

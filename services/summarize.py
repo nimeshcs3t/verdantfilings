@@ -43,6 +43,52 @@ class GeminiBusy(RuntimeError):
     """Every usable Gemini model is at its limit; try again later."""
 
 
+class MemberLimit(GeminiBusy):
+    """This member has used today's AI allowance (AI_PER_MEMBER_PER_DAY)."""
+
+
+def _member() -> dict | None:
+    """The signed-in member when this runs inside a page (background jobs have none and aren't limited)."""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        if get_script_run_ctx(suppress_warning=True) is None:
+            return None
+        import streamlit as st
+        return st.session_state.get("user")
+    except Exception:
+        return None
+
+
+def member_ai_left() -> int | None:
+    """AI requests left today for the signed-in member; None when unlimited (admins, background jobs)."""
+    user = _member()
+    if not user or user.get("role") == "admin":
+        return None
+    from core.usage import counts_today
+    limit = int(get_secret("AI_PER_MEMBER_PER_DAY", "25") or 25)
+    try:
+        used = counts_today().get(f"ai{user['id']}"[:8], 0)
+    except Exception:
+        used = 0
+    return max(0, limit - used)
+
+
+def member_limit_message() -> str:
+    return ("You've used today's AI requests for your account. They reset at midnight UTC; "
+            "everything else in the app keeps working.")
+
+
+def _charge_member() -> None:
+    """Count one AI request against the signed-in member, refusing once the day's allowance is used."""
+    left = member_ai_left()
+    if left is None:
+        return
+    if left <= 0:
+        raise MemberLimit(member_limit_message())
+    from core.usage import count
+    count(f"ai{_member()['id']}"[:8])
+
+
 def gemini_cooling() -> bool:
     try:
         from datetime import datetime, timezone
@@ -106,6 +152,7 @@ def gemini_request(body: dict, timeout: int = 60, light: bool = False) -> dict |
         return None
     if gemini_cooling():
         raise GeminiBusy("Gemini is at its usage limit; paused for a while")
+    _charge_member()
     import time
     configured = get_secret("GEMINI_MODEL")
     tried, candidates = set(_limited), ([*_gemini_model] + ([configured] if configured else []) + GEMINI_MODELS)
@@ -158,6 +205,7 @@ def _anthropic(prompt: str) -> str | None:
     key = get_secret("ANTHROPIC_API_KEY")
     if not key:
         return None
+    _charge_member()
     r = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},

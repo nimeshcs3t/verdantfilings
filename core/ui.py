@@ -29,6 +29,17 @@ CHIP = {
 LOGO_COLOURS = ["#1F6B4F", "#2E5E8C", "#8A5A2B", "#6A4C93", "#9C3D54", "#2F7A7A", "#5B6B2E", "#7A4B2F"]
 
 
+def groups_html(assigned: dict | None) -> str:
+    """A company's sector and structural themes as small tags (sector filled, themes dashed)."""
+    if not assigned:
+        return ""
+    tags = []
+    if assigned.get("sector"):
+        tags.append(f'<span class="grp sector" title="Sector">{esc(assigned["sector"]["name"])}</span>')
+    tags += [f'<span class="grp theme" title="Structural theme">{esc(t["name"])}</span>' for t in assigned.get("themes", [])]
+    return "".join(tags)
+
+
 def is_dark() -> bool:
     try:
         return (st.context.theme.type or "light") == "dark"
@@ -295,6 +306,24 @@ div[class*="st-key-flag-"] {{ margin:-6px 0 2px; }}
 }}
 
 /* ---- v22 design layer: a quiet register; category shown as a thin coloured spine ---- */
+.quote {{ margin:.2rem 0 1.4rem; max-width:62ch; }}
+.quote .q {{ font-size:1.05rem; line-height:1.5; color:var(--ink); }}
+.quote .q::before {{ content:"\\201C"; color:var(--pine); font-weight:600; margin-right:.12em; }}
+.quote .q::after {{ content:"\\201D"; color:var(--pine); font-weight:600; margin-left:.05em; }}
+.quote .by {{ margin-top:.3rem; font-size:.8rem; color:var(--muted); }}
+.grp {{ display:inline-block; font-size:.72rem; line-height:1.5; padding:0 7px; border-radius:999px; margin:2px 4px 0 0;
+        border:1px solid var(--rule-strong); color:var(--ink); white-space:nowrap; }}
+.grp.sector {{ background:var(--surface); border-color:var(--surface); }}
+.grp.theme {{ border-style:dashed; border-color:var(--pine); color:var(--pine); }}
+.grp-line {{ margin:2px 0 0 33px; }}
+.grp-cloud {{ display:flex; flex-wrap:wrap; gap:6px; margin:.2rem 0 .8rem; }}
+.grp-cloud .grp {{ font-size:.82rem; padding:2px 10px; margin:0; }}
+.grp-cloud .grp b {{ font-weight:600; margin-left:7px; color:var(--muted); font-variant-numeric:tabular-nums; }}
+.grp-head {{ font-weight:600; color:var(--ink); }} .grp-note {{ color:var(--muted); font-size:.82rem; }}
+.expo {{ display:grid; grid-template-columns:minmax(120px, 40%) 1fr 52px; gap:6px 10px; align-items:center; font-size:.85rem; }}
+.expo .bar {{ height:8px; border-radius:4px; background:var(--pine); }}
+.expo .bar-bg {{ background:var(--surface); border-radius:4px; }}
+.expo .pct {{ text-align:right; font-variant-numeric:tabular-nums; color:var(--muted); }}
 .imp-help {{ font-size:.85rem; color:var(--muted); line-height:1.5; margin-bottom:.6rem; }}
 .imp-help b {{ color:var(--ink); font-weight:500; }}
 .imp-help ul {{ margin:.25rem 0 .5rem 1.1rem; padding:0; }}

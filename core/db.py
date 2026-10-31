@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timezone
 
-from sqlalchemy import (Boolean, Column, Date, DateTime, Float, Index, Integer, MetaData, String, Table, Text,
+from sqlalchemy import (UniqueConstraint, Boolean, Column, Date, DateTime, Float, Index, Integer, MetaData, String, Table, Text,
                         create_engine)
 from sqlalchemy.engine import Engine
 
@@ -595,6 +595,26 @@ shared_list_items = Table(
     Column("added_by", Integer),
     Column("note", String(200)),
     Column("added_at", DateTime(timezone=True), default=utcnow),
+)
+
+user_groups = Table(
+    "user_groups", metadata,                # a member's own sectors and structural themes
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, nullable=False),
+    Column("name", String(60), nullable=False),
+    Column("kind", String(10), nullable=False),         # sector | theme
+    Column("note", String(300)),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+    UniqueConstraint("user_id", "kind", "name", name="uq_user_groups"),
+)
+
+company_groups = Table(
+    "company_groups", metadata,             # which of the member's sectors / themes a company belongs to
+    Column("user_id", Integer, primary_key=True),
+    Column("group_id", Integer, primary_key=True),
+    Column("market", String(8), primary_key=True),
+    Column("ticker", String(16), primary_key=True),
+    Index("ix_company_groups_user", "user_id"),
 )
 
 # Columns added after a table first existed: (table, column, SQL type). Added on start-up if missing.

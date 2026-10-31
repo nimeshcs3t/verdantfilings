@@ -193,6 +193,12 @@ def enrich_filing(uid: str, force: bool = False) -> dict | None:
     row = get_filing(uid)
     if row is None or (row["summary_en"] and not force):
         return row
+    from .summarize import MemberLimit, _charge_member
+    try:                                    # each requested overview counts towards the member's daily AI allowance
+        _charge_member()
+    except MemberLimit as exc:
+        row["enrich_error"] = str(exc)
+        return row
     if not direct_fetch():
         request_overview(uid)
         row["enrich_pending"] = True

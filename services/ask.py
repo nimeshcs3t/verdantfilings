@@ -39,7 +39,7 @@ def answer(question: str, filing: dict) -> str:
                 return result.strip()
         except Exception:
             continue
-    return "No answer right now. Add a Gemini key in the app secrets, or try again in a minute."
+    return _no_answer()
 
 
 # ---- questions across many filings ------------------------------------------------------------------
@@ -107,7 +107,7 @@ def ask_filings(question: str, rows: list[dict]) -> tuple[str, list[dict]]:
                 return result.strip(), chosen
         except Exception:
             continue
-    return "No answer right now. Add a Gemini key in the app secrets, or try again in a minute.", chosen
+    return _no_answer(), chosen
 
 
 # ---- questions about the member's own portfolio ---------------------------------------------------------------------
@@ -198,4 +198,11 @@ def ask_portfolio(question: str, user_id: int, show_amounts: bool = True) -> tup
                 return result.strip(), filings
         except Exception:
             continue
-    return "No answer right now. Add a Gemini key in the app secrets, or try again in a minute.", filings
+    return _no_answer(), filings
+
+
+def _no_answer() -> str:
+    from .summarize import member_ai_left, member_limit_message
+    if member_ai_left() == 0:
+        return member_limit_message()
+    return "No answer right now. Add a Gemini key in the app secrets, or try again in a minute."

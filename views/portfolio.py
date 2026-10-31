@@ -330,6 +330,42 @@ def overview(model: dict, base: str, bench_symbol: str | None) -> None:
     html_block('<div class="alloc-grid">' + donut_svg("By company", allocation(rows, "name"))
                + donut_svg("By country", allocation(rows, "country"))
                + donut_svg("By currency", allocation(rows, "currency")) + "</div>")
+    group_exposure(rows, st.session_state["user"]["id"])
+
+
+def group_exposure(rows: list[dict], uid: int) -> None:
+    """Value by the member's own sectors (adds to 100%) and structural themes (a holding can count in several)."""
+    from services import groups
+    assigned = groups.assignments(uid)
+    held = [r for r in rows if not r.get("is_cash") and r.get("value_base")]
+    if not assigned or not held:
+        return
+    total = sum(r["value_base"] for r in rows if r.get("value_base")) or 1
+    sectors: dict[str, float] = {}
+    themes: dict[str, float] = {}
+    for r in held:
+        a = assigned.get((r["market"], r["ticker"])) or {}
+        name = (a.get("sector") or {}).get("name") or "No sector"
+        sectors[name] = sectors.get(name, 0.0) + r["value_base"]
+        for t in a.get("themes", []):
+            themes[t["name"]] = themes.get(t["name"], 0.0) + r["value_base"]
+    if set(sectors) == {"No sector"} and not themes:
+        return
+
+    def bars(items: dict[str, float]) -> str:
+        top = max(items.values()) or 1
+        return '<div class="expo">' + "".join(
+            f'<div>{esc(k)}</div><div class="bar-bg"><div class="bar" style="width:{v / top * 100:.1f}%"></div></div>'
+            f'<div class="pct">{v / total:.0%}</div>' for k, v in sorted(items.items(), key=lambda kv: -kv[1])) + "</div>"
+    c1, c2 = st.columns(2, gap="large")
+    with c1:
+        html_block('<div class="section">By sector</div>' + bars(sectors))
+    with c2:
+        if themes:
+            html_block('<div class="section">Structural themes</div>' + bars(themes))
+            st.caption("Share of your portfolio in companies tagged with each theme. A company can carry several "
+                       "themes, so these don't add up to 100%.")
+    st.caption("Sectors and themes are your own; set them on the Watchlist page under Sectors & themes.")
 
 
 def holdings_table(model: dict, base: str, uid: int) -> None:

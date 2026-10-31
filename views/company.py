@@ -78,7 +78,7 @@ def page() -> None:
                f'<h1 class="co-name">{esc(comp["name_en"])}</h1></div><div class="co-meta ko">{meta}{last}</div>')
 
     watching = watch.is_watching(user["id"], market, comp["ticker"])
-    b1, b2, b3, *_ = st.columns([1.1, 1.1, 1, 2])
+    b1, b2, b3, b4, _ = st.columns([1.1, 1.1, 1, 1.3, 0.7])
     if watching:
         if b1.button("Remove from watchlist", width="stretch"):
             watch.remove(user["id"], market, comp["ticker"])
@@ -101,6 +101,15 @@ def page() -> None:
     else:
         b3.link_button("Find website", "https://www.google.com/search?q=" + quote_plus(f'{comp["name_en"]} official website'),
                        width="stretch", icon=":material/travel_explore:")
+
+    from services import groups as groups_svc
+    from core.ui import groups_html
+    from .components import group_picker
+    assigned = groups_svc.assignments(user["id"]).get((market, comp["ticker"]))
+    with b4.popover("Sector & themes", icon=":material/category:", width="stretch"):
+        group_picker(user["id"], market, comp["ticker"], key="co")
+    if assigned:
+        html_block(f'<div style="margin:-.3rem 0 .6rem">{groups_html(assigned)}</div>')
 
     rows = filings_for([(market, comp["ticker"])], src.today() - timedelta(days=180), limit=300)
     for r in rows:

@@ -62,6 +62,10 @@ def page() -> None:
     else:
         subtitle = f"{len(rows)} filings from {source_txt}, {period.lower()}."
     page_header(long_date(today), subtitle)
+    from services.quotes import for_day
+    q_text, q_who, q_where = for_day(today)
+    html_block(f'<div class="quote"><div class="q">{esc(q_text)}</div>'
+               f'<div class="by">{esc(q_who)}{(", " + esc(q_where)) if q_where else ""}</div></div>')
     dashboard(user, all_wl)
 
     main, side = st.columns([2.2, 1], gap="large")

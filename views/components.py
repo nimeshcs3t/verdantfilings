@@ -264,3 +264,44 @@ def render_news(items: list[dict]) -> None:
         html_block(news_html(items))
     else:
         html_block('<div class="empty">No recent articles found.</div>')
+
+
+def group_picker(user_id: int, market: str, ticker: str, key: str) -> None:
+    """Choose this company's sector and structural themes (inside a popover or expander)."""
+    from services import groups
+    mine = groups.list_groups(user_id)
+    sectors = [g for g in mine if g["kind"] == "sector"]
+    themes = [g for g in mine if g["kind"] == "theme"]
+    current = groups.assignments(user_id).get((market, ticker)) or {"sector": None, "themes": []}
+    if not mine:
+        st.caption("You haven't made any sectors or themes yet.")
+    names = {g["id"]: g["name"] for g in mine}
+    with st.form(f"grp-{key}", border=False):
+        sector_ids = [None] + [g["id"] for g in sectors]
+        cur_sector = (current["sector"] or {}).get("id")
+        sector = st.selectbox("Sector", sector_ids, index=sector_ids.index(cur_sector) if cur_sector in sector_ids else 0,
+                              format_func=lambda i: "None" if i is None else names[i],
+                              help="What the company does. One per company.")
+        chosen = st.multiselect("Structural themes", [g["id"] for g in themes],
+                                default=[t["id"] for t in current["themes"] if t["id"] in names],
+                                format_func=names.get, placeholder="Choose themes",
+                                help="Long-running trends the company rides. A company can have several.")
+        new_name = st.text_input("Or add a new one", placeholder="e.g. Defence electronics, Ageing population",
+                                 max_chars=60)
+        new_kind = st.radio("It is a", list(groups.KINDS), format_func=groups.KINDS.get, horizontal=True,
+                            label_visibility="collapsed")
+        if st.form_submit_button("Save", type="primary"):
+            if new_name.strip():
+                err = groups.add_group(user_id, new_name, new_kind)
+                if err:
+                    st.warning(err)
+                    return
+                added = next(g for g in groups.list_groups(user_id, new_kind)
+                             if g["name"].lower() == " ".join(new_name.split()).lower())
+                if new_kind == "sector":
+                    sector = added["id"]
+                else:
+                    chosen = list(chosen) + [added["id"]]
+            groups.set_company(user_id, market, ticker, sector, list(chosen))
+            st.toast("Saved sector and themes.")
+            st.rerun()

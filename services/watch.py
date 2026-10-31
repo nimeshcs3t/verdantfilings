@@ -58,6 +58,23 @@ def add(user: dict, market: str, ticker: str) -> tuple[dict | None, str | None]:
     return comp, None
 
 
+def replace(user: dict, old: tuple[str, str], new: tuple[str, str]) -> None:
+    """Swap a watchlist entry for another listing of the same company (keeps the alert setting)."""
+    with get_engine().connect() as conn:
+        row = conn.execute(select(watchlist.c.notify).where(watchlist.c.user_id == user["id"], watchlist.c.market == old[0],
+                                                             watchlist.c.ticker == old[1])).first()
+    if row is None:
+        return
+    if not is_watching(user["id"], *new):
+        comp = get_company(*new)
+        if comp is None:
+            return
+        with get_engine().begin() as conn:
+            conn.execute(insert(watchlist).values(user_id=user["id"], market=new[0], ticker=comp["ticker"],
+                                                  notify=row[0], added_at=utcnow()))
+    remove(user["id"], *old)
+
+
 def remove(user_id: int, market: str, ticker: str) -> None:
     with get_engine().begin() as conn:
         conn.execute(delete(watchlist).where(watchlist.c.user_id == user_id, watchlist.c.market == market,

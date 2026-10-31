@@ -11,7 +11,7 @@ from core.db import as_utc, bot_state, companies, filings, get_engine, ipos, lis
 PAUSE_KEYS = {"IL": ["maya"], "HK": ["hkex"], "NO": ["oslo"], "UK": ["fca_nsm"], "FR": ["amf"], "TW": ["twse"],
               "SE": ["nasdaq_nordic"], "DK": ["nasdaq_nordic"], "FI": ["nasdaq_nordic"], "JP": ["tdnet"],
               "IS": ["nasdaq_nordic"], "EE": ["nasdaq_nordic"], "LV": ["nasdaq_nordic"], "LT": ["nasdaq_nordic"],
-              "NL": ["euronext"], "BE": ["euronext"], "PT": ["euronext"], "IE": ["euronext"], "IT": ["euronext"],
+              "NL": ["euronext"], "BE": ["euronext"], "PT": ["euronext"], "IE": ["euronext"], "IT": ["emarket", "euronext"],
               "ES": ["cnmv"], "OT": ["otc_markets"]}
 IPO_PAUSE = {"US": "ipo_nasdaq", "JP": "ipo_jpx", "HK": "ipo_hkex", "AU": "ipo_asx"}
 

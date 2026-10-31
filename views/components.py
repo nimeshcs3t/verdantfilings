@@ -79,6 +79,13 @@ def _render_filing(f: dict, key: str, show_company: bool, link_company: bool, co
                     st.warning((enriched or {}).get("enrich_error", "This filing couldn't be processed."))
             else:
                 st.caption("Translates the filing to English and writes a short overview.")
+            if user and st.button("Make notes from this filing", key=f"dn-{key}-{f['uid']}", type="tertiary",
+                                  icon=":material/auto_awesome:",
+                                  help="Download the document, highlight it, upload it back: AI writes short notes "
+                                       "and saves them to your journal."):
+                st.session_state["doc_notes_filing"] = {k: f.get(k) for k in ("uid", "market", "ticker", "url",
+                                                                              "title_en", "title_local", "filed_date")}
+                nav.go("journal")
             if show_company and link_company:
                 if st.button("Company page", key=f"co-{key}-{f['uid']}", type="tertiary"):
                     nav.open_company(f["market"], f["ticker"])

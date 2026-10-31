@@ -7,7 +7,7 @@ from services import journal, portfolio, watch
 from services.pipeline import get_company
 
 KIND_CHIP = {"thesis": "earnings", "buy": "buyback", "sell": "mna", "update": "periodic", "review": "meeting", "lesson": "ownership",
-             "filing": "contract"}
+             "filing": "contract", "notes": "dividend"}
 
 
 def _companies(uid: int) -> dict[str, tuple[str | None, str | None]]:
@@ -98,6 +98,18 @@ def page() -> None:
                                                    for k, v in stats) + "</div>")
     with st.expander("New entry", icon=":material/edit_note:", expanded=not rows):
         entry_form(user["id"])
+    from_filing = st.session_state.get("doc_notes_filing")
+    with st.expander("Notes from a document: highlight a PDF, AI writes the notes", icon=":material/auto_awesome:",
+                     expanded=bool(from_filing)):
+        from .doc_notes import doc_notes
+        if from_filing:
+            c1, c2 = st.columns([4, 1], vertical_alignment="center")
+            c1.caption(f"For the filing: {from_filing.get('title_en') or from_filing.get('title_local')} "
+                       f"({from_filing['filed_date']:%d %b %Y})")
+            if c2.button("Clear", key="dn-clear", type="tertiary"):
+                st.session_state.pop("doc_notes_filing", None)
+                st.rerun()
+        doc_notes(user, key="journal", filing=from_filing)
     due = [r for r in rows if r["review_on"] and r["review_on"] <= date.today()]
     if due:
         html_block('<div class="section">Reviews due</div>')

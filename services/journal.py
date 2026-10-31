@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, insert, select, update
 from core.db import filings, get_engine, journal
 
 KINDS = {"thesis": "Thesis", "buy": "Buy", "sell": "Sell", "update": "Update", "review": "Review", "lesson": "Lesson",
-         "filing": "Filing note"}
+         "filing": "Filing note", "notes": "Document notes"}
 
 
 def entries(user_id: int, market: str | None = None, ticker: str | None = None, filing_uid: str | None = None) -> list[dict]:

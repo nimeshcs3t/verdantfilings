@@ -451,7 +451,7 @@ def inject_css() -> None:
 
 
 def esc(value) -> str:
-    return html.escape(str(value or ""))
+    return html.escape("" if value is None else str(value))
 
 
 def html_block(markup: str) -> None:

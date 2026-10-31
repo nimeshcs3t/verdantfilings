@@ -196,6 +196,9 @@ def page() -> None:
         for e in entries[:20]:
             entry_card(e, show_company=False, key="cj")
 
+    with st.expander("Notes from a document (highlights to AI notes)", icon=":material/auto_awesome:"):
+        from .doc_notes import doc_notes
+        doc_notes(user, key=f"co-{market}-{comp['ticker']}", preset=(market, comp["ticker"]))
     with st.expander("My notes on this company", icon=":material/edit_note:"):
         note = personal.get_note(user["id"], market, comp["ticker"])
         with st.form(f"note-{market}-{comp['ticker']}", border=False):

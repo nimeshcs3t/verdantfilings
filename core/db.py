@@ -626,6 +626,52 @@ listing_links = Table(
     Column("created_at", DateTime(timezone=True), default=utcnow),
 )
 
+stock_ideas = Table(
+    "stock_ideas", metadata,                # companies a member is considering, with their own judgement on them
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, nullable=False),
+    Column("market", String(8), nullable=False),
+    Column("ticker", String(16), nullable=False),
+    Column("name", String(200)),
+    Column("lynch_type", String(16)),                   # fast | stalwart | cyclical | turnaround | slow | asset
+    Column("thesis", Text),
+    Column("status", String(12), default="new"),        # new | researching | watching | passed | owned
+    Column("decision", String(8)),                      # BUY | HOLD | SELL | WATCH | PASS
+    Column("decision_price", Float),
+    Column("decision_date", Date),
+    Column("added_at", DateTime(timezone=True), default=utcnow),
+    Column("updated_at", DateTime(timezone=True), default=utcnow),
+    UniqueConstraint("user_id", "market", "ticker", name="uq_stock_ideas"),
+)
+
+idea_sources = Table(
+    "idea_sources", metadata,               # where an idea came from: a tweet, a Substack post, a fund letter...
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, nullable=False),
+    Column("idea_id", Integer, nullable=False),
+    Column("kind", String(12), nullable=False),         # twitter | substack | letter | podcast | other
+    Column("author", String(120)),                      # @handle, newsletter or fund
+    Column("url", String(500)),
+    Column("note", Text),                               # what they said
+    Column("letter_id", Integer),
+    Column("source_date", Date),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+    Index("ix_idea_sources_idea", "idea_id"),
+)
+
+investor_letters = Table(
+    "investor_letters", metadata,           # quarterly letters from funds a member follows
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", Integer, nullable=False),
+    Column("fund", String(120), nullable=False),
+    Column("period", String(20)),                       # e.g. Q3 2026
+    Column("published", Date),
+    Column("url", String(500)),
+    Column("notes", Text),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+    Index("ix_investor_letters_user", "user_id"),
+)
+
 # Columns added after a table first existed: (table, column, SQL type). Added on start-up if missing.
 UPGRADES = [("journal", "target_price", "FLOAT"), ("company_meta", "shares", "FLOAT"),
             ("users", "totp_secret", "VARCHAR(64)"), ("users", "totp_last_step", "INTEGER"), ("users", "backup_codes", "TEXT"),

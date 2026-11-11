@@ -113,9 +113,33 @@ def get_company(market: str, ticker: str, resolve: bool = True) -> dict | None:
 
 
 # ---- filings -----------------------------------------------------------------------------
-def sync_company(market: str, ticker: str, force: bool = False) -> int:
-    """Worker only: pull recent filings for one company. Returns the number of new filings stored."""
-    if not direct_fetch():
+def check_company(market: str, ticker: str, days: int = 30) -> dict:
+    """Admin: what the app has stored for a company against what its source shows now (last `days` days)."""
+    from sqlalchemy import func
+    comp = get_company(market, ticker)
+    out: dict = {"company": comp, "stored": [], "source": [], "error": None}
+    if comp is None:
+        out["error"] = "The app can't find this company on its source."
+        return out
+    src = get_source(market)
+    start = src.today() - timedelta(days=days)
+    with get_engine().connect() as conn:
+        out["stored"] = [dict(r) for r in conn.execute(select(filings.c.uid, filings.c.filed_date, filings.c.title_en)
+                                                       .where(filings.c.market == market, filings.c.ticker == comp["ticker"],
+                                                              filings.c.filed_date >= start)
+                                                       .order_by(filings.c.filed_date.desc())).mappings()]
+    try:
+        found = src.list_filings(Company(comp["market"], comp["ticker"], comp["source_id"], comp["name_local"],
+                                         comp["name_en"]), start, src.today())
+        out["source"] = [{"uid": f.uid, "filed_date": f.filed_date, "title": f.title_en or f.title_local} for f in found]
+    except Exception as exc:
+        out["error"] = f"{exc.__class__.__name__}: {str(exc)[:300]}"
+    return out
+
+
+def sync_company(market: str, ticker: str, force: bool = False, from_admin: bool = False, days: int | None = None) -> int:
+    """Pull recent filings for one company (the worker, or the admin's 'fetch now'). Returns how many were new."""
+    if not direct_fetch() and not from_admin:
         return 0
     comp = get_company(market, ticker)
     if comp is None:
@@ -125,7 +149,7 @@ def sync_company(market: str, ticker: str, force: bool = False) -> int:
         return 0
     src = get_source(market)
     today = src.today()
-    start = today - timedelta(days=src.incremental_days if last else src.backfill_days)
+    start = today - timedelta(days=days or (src.incremental_days if last else src.backfill_days))
     company = Company(comp["market"], comp["ticker"], comp["source_id"], comp["name_local"], comp["name_en"])
     try:
         found = src.list_filings(company, start, today)

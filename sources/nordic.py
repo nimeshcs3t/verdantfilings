@@ -81,7 +81,25 @@ class NordicSource(FilingSource):
         return [("Nasdaq Nordic news", "https://www.nasdaq.com/european-market-activity/news/company-news")]
 
     def _query(self, **params) -> list[dict]:
-        base = {**BASE_PARAMS, "limit": 100, "freeText": "", "company": "", "fromDate": "", "toDate": ""}
+        """Stock exchange releases and press releases: Nasdaq lists them separately (globalGroup), so both are asked
+        for and merged. A partner's press release naming the company is often only in the second list."""
+        out, seen = [], set()
+        for group in ("exchangeNotice", ""):
+            try:
+                items = self._query_group(group, **params)
+            except Exception:
+                if group:
+                    raise
+                items = []                     # the press-release list is a bonus: never fail the company for it
+            for i in items:
+                if i.get("disclosureId") not in seen:
+                    seen.add(i.get("disclosureId"))
+                    out.append(i)
+        return out
+
+    def _query_group(self, global_group: str, **params) -> list[dict]:
+        base = {**BASE_PARAMS, "globalGroup": global_group, "limit": 100, "freeText": "", "company": "", "fromDate": "",
+                "toDate": ""}
         groups = [self.group] if self.group == "NordicAllMarkets" else \
             [g for g in (getattr(NordicSource, "_baltic_group", None), self.group, "NordicAllMarkets") if g]
         for group in dict.fromkeys(groups):     # the Baltic group name isn't documented: use the first that answers

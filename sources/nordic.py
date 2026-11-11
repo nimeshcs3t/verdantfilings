@@ -94,13 +94,16 @@ class NordicSource(FilingSource):
         return []
 
     def _items(self, company: Company, start: date, end: date) -> list[dict]:
+        """By company name as Nasdaq writes it (tried: the full name, e.g. 'Sensofusion Oyj', then the short name),
+        then by a text search kept to that company's releases."""
         dates = {"fromDate": f"{start}", "toDate": f"{end}"}
-        items = self._query(company=company.source_id, **dates)
-        if not items:      # names differ slightly between sources: search by name and keep exact company matches
-            core = company.source_id.split(" ")[0].lower()
-            items = [i for i in self._query(freeText=company.source_id, **dates)
-                     if (i.get("company") or "").lower().startswith(core)]
-        return items
+        for name in dict.fromkeys(n for n in (company.name_local, company.source_id) if n):
+            items = self._query(company=name, **dates)
+            if items:
+                return items
+        core = (company.source_id or company.name_local).split(" ")[0].lower()
+        return [i for i in self._query(freeText=company.source_id or company.name_local, **dates)
+                if (i.get("company") or "").lower().startswith(core)]
 
     def _filing(self, i: dict, company: Company) -> Filing | None:
         try:
@@ -115,11 +118,12 @@ class NordicSource(FilingSource):
 
     def list_filings(self, company: Company, start: date, end: date) -> list[Filing]:
         items = self._items(company, start, end)
-        has_english = {i.get("headline") for i in items if i.get("language") == "en"}
+        # the same release often comes in English and the local language at the same minute: keep the English one,
+        # but only when that English version is actually here (a Finnish-only release must not be dropped)
+        english_at = {str(i.get("published") or i.get("releaseTime"))[:16] for i in items if i.get("language") == "en"}
         out = []
         for i in items:
-            # the same release often comes in English and the local language; keep English when there is one
-            if i.get("language") != "en" and "en" in (i.get("languages") or []) and has_english:
+            if i.get("language") != "en" and str(i.get("published") or i.get("releaseTime"))[:16] in english_at:
                 continue
             f = self._filing(i, company)
             if f and start <= f.filed_date <= end:

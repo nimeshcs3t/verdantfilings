@@ -128,6 +128,36 @@ class NordicSource(FilingSource):
             f = self._filing(i, company)
             if f and start <= f.filed_date <= end:
                 out.append(f)
+        out += self._named_by_others(company, start, end, {i.get("disclosureId") for i in items})
+        return out
+
+    def _named_by_others(self, company: Company, start: date, end: date, seen: set) -> list[Filing]:
+        """Releases by other companies that name this one in the headline (e.g. a partner announcing a joint
+        venture: 'Elisa Oyj: Elisa and Sensofusion establish a joint venture'). Shown with who published them."""
+        core = (company.source_id or company.name_local or "").split(" ")[0]
+        if len(core) < 4:
+            return []                         # too short to search safely
+        try:
+            items = self._query(freeText=core, fromDate=f"{start}", toDate=f"{end}")
+        except Exception:
+            return []
+        pattern = re.compile(rf"\b{re.escape(core)}\b", re.I)
+        own = core.lower()
+        english_at = {str(i.get("published"))[:16] + (i.get("company") or "") for i in items if i.get("language") == "en"}
+        out = []
+        for i in items:
+            publisher = i.get("company") or ""
+            if publisher.lower().startswith(own) or i.get("disclosureId") in seen:
+                continue                      # the company's own release: already listed
+            if not pattern.search(i.get("headline") or ""):
+                continue                      # named in the body only: too loose
+            if i.get("language") != "en" and str(i.get("published"))[:16] + publisher in english_at:
+                continue
+            f = self._filing(i, company)
+            if f and start <= f.filed_date <= end:
+                f.uid = f"{self.market}:{i.get('disclosureId')}:{company.ticker}"[:64]   # separate from the publisher's copy
+                f.filer = f"Release by {publisher}" if publisher else "Release by another company"
+                out.append(f)
         return out
 
     def market_feed(self) -> list[dict]:

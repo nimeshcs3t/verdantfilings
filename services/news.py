@@ -1,6 +1,8 @@
 """Company news from Google News RSS (free, no key)."""
 from __future__ import annotations
 
+import re
+
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
 
@@ -20,22 +22,38 @@ def google_news(query: str, hl: str = "en-US", gl: str = "US", ceid: str = "US:e
     except requests.RequestException:
         return []
     items = []
-    for e in feedparser.parse(r.content).entries[:limit]:
+    for e in feedparser.parse(r.content).entries:
         source = (e.get("source") or {}).get("title", "")
         title = e.get("title", "")
         if source and title.endswith(f" - {source}"):
             title = title[: -(len(source) + 3)]
         published = datetime(*e.published_parsed[:6], tzinfo=timezone.utc) if e.get("published_parsed") else None
         items.append({"title": title, "link": e.get("link", ""), "source": source, "published": published})
-    return items
+    # Google returns its "most relevant" order; show the newest first so a fresh release isn't cut off
+    items.sort(key=lambda i: i["published"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return items[:limit]
+
+
+LEGAL_WORDS = {"oyj", "oy", "abp", "ab", "publ", "asa", "as", "a/s", "plc", "ag", "se", "sa", "nv", "spa", "srl", "ltd",
+               "limited", "inc", "corp", "corporation", "co", "company", "holding", "holdings", "group", "gmbh", "kgaa",
+               "bhd", "tbk", "pcl", "kk"}
+
+
+def short_name(name: str) -> str:
+    """'Sensofusion Oyj' -> 'Sensofusion', 'Samsung Electronics Co., Ltd.' -> 'Samsung Electronics': headlines rarely
+    carry the legal form. Only trailing legal words are removed, and at least one word is always kept."""
+    words = re.sub(r"\(.*?\)", " ", name or "").split()
+    while len(words) > 1 and re.sub(r"[.,]", "", words[-1]).lower() in LEGAL_WORDS:
+        words.pop()
+    return " ".join(words).strip(" ,") or (name or "").strip()
 
 
 def english_news(name_en: str, ticker: str, limit: int = 10) -> list[dict]:
-    return google_news(f'"{name_en}" when:30d', limit=limit)
+    return google_news(f'"{short_name(name_en)}" when:30d', limit=limit)
 
 
 def local_news(name_local: str, params: dict, src_lang: str, limit: int = 10) -> list[dict]:
-    items = google_news(f'"{name_local}" when:14d', limit=limit, **params)
+    items = google_news(f'"{short_name(name_local)}" when:14d', limit=limit, **params)
     if items and src_lang != "en":
         english = translate_lines([i["title"] for i in items], src_lang)
         for item, en in zip(items, english):

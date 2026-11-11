@@ -22,6 +22,7 @@ def page() -> None:
     health_panel()
     sources_panel()
     links_panel(me)
+    company_check_panel()
 
     with get_engine().connect() as conn:
         counts = {name: conn.execute(select(func.count()).select_from(t)).scalar_one()
@@ -197,6 +198,50 @@ def links_panel(me: dict) -> None:
             if not link.get("built_in") and c2.button("Remove", key=f"unlink-{link['symbol']}", type="tertiary"):
                 home_listing.remove_link(link["symbol"])
                 st.rerun()
+
+
+def company_check_panel() -> None:
+    """Why isn't a company's filing showing? Compare what's stored with what its source shows right now."""
+    from services.pipeline import check_company, sync_company, tracked_pairs
+    with st.expander("Check one company's filings", icon=":material/troubleshoot:"):
+        pairs = sorted(tracked_pairs())
+        if not pairs:
+            st.caption("No companies yet.")
+            return
+        c1, c2 = st.columns([2, 1])
+        pick = c1.selectbox("Company", pairs, format_func=lambda p: f"{p[1]} ({p[0]})", key="cc-pick")
+        days = c2.selectbox("Look back", [7, 30, 90], index=1, format_func=lambda d: f"{d} days", key="cc-days")
+        if st.button("Check now", key="cc-go", icon=":material/search:"):
+            with st.spinner("Asking the source"):
+                st.session_state["cc-result"] = (pick, days, check_company(pick[0], pick[1], days))
+        res = st.session_state.get("cc-result")
+        if not res or res[0] != pick:
+            return
+        _, days, r = res
+        comp = r["company"]
+        if comp:
+            st.markdown(f"**{esc(comp['name_en'])}** ({esc(comp['name_local'])}). Source id: `{esc(comp['source_id'])}`. "
+                        f"Last checked by the background job: "
+                        f"{relative_time(comp['last_synced']) if comp.get('last_synced') else 'never'}.")
+        if r["error"]:
+            st.error(f"The source answered with an error: {r['error']}")
+        stored = {x["uid"] for x in r["stored"]}
+        missing = [x for x in r["source"] if x["uid"] not in stored]
+        st.markdown(f"Source shows **{len(r['source'])}** filings in the last {days} days; the app has **{len(r['stored'])}**; "
+                    f"**{len(missing)}** missing.")
+        if missing:
+            html_block('<div class="tbl-wrap"><table class="tbl"><tr><th>Date</th><th>Missing filing</th></tr>' + "".join(
+                f'<tr><td>{x["filed_date"]:%d %b}</td><td>{esc(x["title"])}</td></tr>' for x in missing[:30]) + "</table></div>")
+            if st.button(f"Save the {len(missing)} missing filings now", key="cc-save", type="primary"):
+                with st.spinner("Saving"):
+                    n = sync_company(pick[0], pick[1], force=True, from_admin=True, days=days)
+                st.success(f"Saved {n} filings. They appear on Today and the company page now.")
+                st.session_state.pop("cc-result", None)
+        elif r["source"] and not r["error"]:
+            st.caption("Everything the source shows is already in the app.")
+        elif not r["error"]:
+            st.caption("The source shows no filings for this company in that period. If you can see filings on the "
+                       "exchange's own website, the company may be matched to the wrong entry there: send this result.")
 
 
 def sources_panel() -> None:

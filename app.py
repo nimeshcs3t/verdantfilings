@@ -12,7 +12,7 @@ from core.db import get_engine  # noqa: E402
 from core.session import apply_cookie_changes, current_user  # noqa: E402
 from core.ui import inject_css  # noqa: E402
 from views import account, admin, calendar, company, compare, ipos, journal, portfolio, screener, search, signin, today, watchlist  # noqa: E402
-from views import filings as filings_view, ideas as ideas_view  # noqa: E402
+from views import filings as filings_view, ideas as ideas_view, insiders_page as insiders_view  # noqa: E402
 
 
 @st.cache_resource(show_spinner=False)
@@ -72,6 +72,7 @@ pages = {
     "watchlist": st.Page(watchlist.page, title="Watchlist", url_path="watchlist"),
     "filings": st.Page(filings_view.page, title="All filings", url_path="filings"),
     "ideas": st.Page(ideas_view.page, title="Stock ideas", url_path="ideas"),
+    "insiders": st.Page(insiders_view.page, title="Insider trades", url_path="insiders"),
     "portfolio": st.Page(portfolio.page, title="Portfolio", url_path="portfolio"),
     "calendar": st.Page(calendar.page, title="Calendar", url_path="calendar"),
     "screener": st.Page(screener.page, title="Screener", url_path="screener"),

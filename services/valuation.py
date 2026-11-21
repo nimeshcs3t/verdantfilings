@@ -60,6 +60,8 @@ def quick_view(market: str, ticker: str, hist: list, trade_currency: str) -> dic
         if len(annual) >= 2 and annual[-2].get("revenue") and annual[-1].get("revenue"):
             out["growth"] = annual[-1]["revenue"] / annual[-2]["revenue"] - 1
     n_shares = shares(market, ticker)
+    if n_shares:
+        out["shares"] = n_shares
     if n_shares and out.get("price"):
         mcap = n_shares * out["price"]
         out["market_cap"] = mcap
@@ -74,7 +76,8 @@ def quick_view(market: str, ticker: str, hist: list, trade_currency: str) -> dic
     return out
 
 
-ROWS = [("Price", "price", "money"), ("Market cap", "market_cap", "big"), ("P/E", "pe", "x"), ("Price / sales", "ps", "x"),
+ROWS = [("Price", "price", "money"), ("Market cap", "market_cap", "big"), ("Shares outstanding", "shares", "count"),
+        ("P/E", "pe", "x"), ("Price / sales", "ps", "x"),
         ("Revenue", "revenue", "fin"), ("Revenue growth", "growth", "pct"), ("Operating margin", "op_margin", "pct"),
         ("Net margin", "net_margin", "pct"), ("1-year return", "ret1y", "pct"), ("52-week range", "range", "range"),
         ("Volatility (1y)", "volatility", "pct0"), ("Worst drop (1y)", "drawdown", "pct")]
@@ -96,6 +99,19 @@ def fmt(q: dict, key: str, kind: str) -> str:
         return money(v, q.get("fin_currency") or "")
     if kind == "x":
         return f"{v:,.1f}×"
+    if kind == "count":
+        return count(v)
     if kind == "pct0":
         return f"{v * 100:.0f}%"
     return f"{v * 100:+.1f}%"
+
+
+def count(v: float | None) -> str:
+    """12_400_000 -> '12.4 m' (shares and other counts)."""
+    if v is None:
+        return "–"
+    for div, word in ((1e9, "bn"), (1e6, "m"), (1e3, "k")):
+        if abs(v) >= div:
+            n = v / div
+            return f"{n:,.2f} {word}" if n < 10 else f"{n:,.1f} {word}" if n < 100 else f"{n:,.0f} {word}"
+    return f"{v:,.0f}"

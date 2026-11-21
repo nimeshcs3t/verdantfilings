@@ -50,6 +50,9 @@ def page() -> None:
     rows.sort(key=lambda r: (r["filed_date"], r["uid"]), reverse=True)
     for r in rows:
         r["category"] = categorize(r["title_en"], r["title_local"], r.get("price_sensitive"))
+    from services.personal import get_prefs
+    if get_prefs(user["id"]).get("skip_insider"):          # compiled on the Insider trades page instead
+        rows = [r for r in rows if r["category"] != "insider"]
 
     n = len(wl)
     yours = "your company" if n == 1 else f"your {n} companies"

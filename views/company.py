@@ -168,9 +168,16 @@ def page() -> None:
     fv_row = fairvalue.get_all(user["id"]).get((market, comp["ticker"]))
     if fv_row:
         levels.append((fv_row["value"], "Fair value", "fair"))
-    chart = prices.chart_svg(hist, [r["filed_date"] for r in rows], days=250, levels=levels)
-    if chart:
-        html_block(chart)
+    view = st.segmented_control("Chart", ["Simple", "Technical"], default="Simple", key=f"chart-kind-{market}-{comp['ticker']}",
+                                label_visibility="collapsed",
+                                help="Technical: price with EMA 21 and EMA 50, volume, and RSI 14.")
+    if view == "Technical":
+        from .tech_chart import technical_chart
+        technical_chart(market, comp["ticker"], [r["filed_date"] for r in rows], key=f"{market}-{comp['ticker']}")
+    else:
+        chart = prices.chart_svg(hist, [r["filed_date"] for r in rows], days=250, levels=levels)
+        if chart:
+            html_block(chart)
 
     fv = fairvalue.get_all(user["id"]).get((market, comp["ticker"]))
     last_price = hist[-1][1] if hist else None

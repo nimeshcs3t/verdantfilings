@@ -57,7 +57,7 @@ def _table(user: dict, rows: list[dict]) -> pd.DataFrame:
             "Type": svc.TYPES.get(r.get("lynch_type") or "", ""),
             "Sector": ((sectors.get(key) or {}).get("sector") or {}).get("name", ""),
             "Price": m.get("price"), "1D": pct(m.get("d1")), "1M": pct(m.get("m1")), "12M": pct(m.get("m12")),
-            "From high": pct(m.get("from_high")), "Mkt cap": m.get("market_cap"),
+            "From high": pct(m.get("from_high")), "Mkt cap": m.get("market_cap"), "Shares": m.get("shares"),
             "P/E": round(m["pe"], 1) if m.get("pe") else None, "EBIT %": pct(m.get("ebit_margin")),
             "Rev y/y": pct(m.get("growth")),
             "Next report": (nxt[0].strftime("%d %b") + (" (est.)" if nxt[1] else "")) if nxt else "",
@@ -71,7 +71,7 @@ def _table(user: dict, rows: list[dict]) -> pd.DataFrame:
     if bar:
         bar.empty()
     df = pd.DataFrame(data)
-    for col in ("Price", "1D", "1M", "12M", "From high", "Mkt cap", "P/E", "EBIT %", "Rev y/y", "Insiders 12m", "Notes"):
+    for col in ("Price", "1D", "1M", "12M", "From high", "Mkt cap", "Shares", "P/E", "EBIT %", "Rev y/y", "Insiders 12m", "Notes"):
         df[col] = pd.to_numeric(df[col], errors="coerce")          # empty values show as blanks, not "None"
     return df
 
@@ -123,7 +123,7 @@ def ideas_tab(user: dict) -> None:
         _style(df), hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row", key="idea-table",
         height=min(35 * (len(df) + 1) + 3, 720),
         column_order=["#", "Ticker", "Company", "Type", "Sector", "Price", "1D", "1M", "12M", "From high", "Mkt cap",
-                      "P/E", "EBIT %", "Rev y/y", "Next report", "Insiders 12m", "Notes", "Source", "Link", "Decision"],
+                      "Shares", "P/E", "EBIT %", "Rev y/y", "Next report", "Insiders 12m", "Notes", "Source", "Link", "Decision"],
         column_config={
             "#": st.column_config.NumberColumn(width=40), "Ticker": st.column_config.TextColumn(width="small"),
             "Company": st.column_config.TextColumn(width="medium"), "Type": st.column_config.TextColumn(width="small"),
@@ -131,6 +131,7 @@ def ideas_tab(user: dict) -> None:
             "1D": st.column_config.NumberColumn(format=pct), "1M": st.column_config.NumberColumn(format=pct),
             "12M": st.column_config.NumberColumn(format=pct), "From high": st.column_config.NumberColumn(format=pct),
             "Mkt cap": st.column_config.NumberColumn(format="compact", help="In the company's trading currency"),
+            "Shares": st.column_config.NumberColumn(format="compact", help="Shares outstanding, from the latest reported figures"),
             "P/E": st.column_config.NumberColumn(format="%.1fx"), "EBIT %": st.column_config.NumberColumn(format="%.1f%%",
                                                                                                         help="Operating margin, last full year"),
             "Rev y/y": st.column_config.NumberColumn(format=pct, help="Revenue growth, last full year"),

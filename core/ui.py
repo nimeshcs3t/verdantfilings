@@ -306,6 +306,7 @@ div[class*="st-key-flag-"] {{ margin:-6px 0 2px; }}
 }}
 
 /* ---- v22 design layer: a quiet register; category shown as a thin coloured spine ---- */
+.tech-read {{ font-size:.82rem; color:var(--muted); margin:-.2rem 0 .8rem; }}
 .quote {{ margin:.2rem 0 1.4rem; max-width:62ch; }}
 .quote .q {{ font-size:1.05rem; line-height:1.5; color:var(--ink); }}
 .quote .q::before {{ content:"\\201C"; color:var(--pine); font-weight:600; margin-right:.12em; }}

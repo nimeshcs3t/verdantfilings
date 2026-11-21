@@ -221,7 +221,7 @@ def metrics(market: str, ticker: str) -> dict:
             {"price": hist[-1][1], "high52": max(v for _, v in hist[-260:])} if hist else {}
     except Exception:
         q = {"price": hist[-1][1]} if hist else {}
-    out.update(currency=cur, price=q.get("price"), market_cap=q.get("market_cap"), pe=q.get("pe"), ps=q.get("ps"),
+    out.update(currency=cur, price=q.get("price"), market_cap=q.get("market_cap"), shares=q.get("shares"), pe=q.get("pe"), ps=q.get("ps"),
                ebit_margin=q.get("op_margin"), growth=q.get("growth"))
     if hist:
         price = hist[-1][1]

@@ -93,7 +93,8 @@ def alert_settings(user: dict) -> None:
                             format_func=lambda h: f"{h:02d}:00")
         tz = c2.selectbox("Your timezone", TIMEZONES,
                           index=TIMEZONES.index(prefs["tz"]) if prefs["tz"] in TIMEZONES else 0)
-        skip = st.checkbox("Skip insider-trade alerts (Form 4, director dealings)", value=bool(prefs["skip_insider"]))
+        skip = st.checkbox("Keep insider filings off Today and alerts (Form 4, director dealings)", value=bool(prefs["skip_insider"]),
+                           help="They're all on the Insider trades page instead.")
         weekly = st.checkbox("Send a weekly report on Monday at the digest time", value=bool(prefs["weekly"]))
         if st.form_submit_button("Save alert settings", type="primary"):
             personal.save_prefs(user["id"], alert_mode="instant" if mode == "Instant" else "digest",

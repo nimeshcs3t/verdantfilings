@@ -17,33 +17,46 @@ def _posts(newsletters: tuple, days: int) -> list[dict]:
 
 
 def _manage(uid: int, follows: list[str]) -> None:
+    """Add newsletters one at a time; each one listed with a remove button."""
     with st.expander(f"Newsletters you follow ({len(follows)})", expanded=not follows, icon=":material/edit:"):
-        st.caption("Bring in the list from your Substack profile, or paste names: one per line, the part before "
-                   ".substack.com (e.g. thegeneralist) or a newsletter's own web address.")
-        c1, c2 = st.columns([2, 1], vertical_alignment="bottom")
-        handle = c1.text_input("Your Substack handle", placeholder="@yourname", key="ss-handle")
-        if c2.button("Import my subscriptions", key="ss-import", width="stretch") and handle.strip():
-            with st.spinner("Reading your Substack profile"):
-                found, err = substack.subscriptions_of(handle)
-            if err:
-                st.warning(err)
-            else:
-                merged = list(dict.fromkeys(follows + found))[:150]
-                settings_svc.save(uid, substack_feeds=merged)
+        st.caption("Add each newsletter you read. Any of these works: its name (thegeneralist), its address "
+                   "(thegeneralist.substack.com or its own domain), a link to any of its posts, or the writer's "
+                   "profile (@handle). Your own Substack account can stay private.")
+        with st.form("ss-add", border=False, clear_on_submit=True):
+            c1, c2 = st.columns([4, 1], vertical_alignment="bottom")
+            entry = c1.text_input("Add a newsletter", placeholder="thegeneralist, or paste a link", key="ss-entry")
+            if c2.form_submit_button("Add", type="primary", width="stretch") and entry.strip():
+                with st.spinner("Checking the newsletter"):
+                    value, title, err = substack.resolve(entry)
+                if err:
+                    st.warning(err)
+                elif value in follows:
+                    st.info(f"{title} is already on your list.")
+                else:
+                    settings_svc.save(uid, substack_feeds=(follows + [value])[:150])
+                    st.cache_data.clear()
+                    st.toast(f"Added {title}.")
+                    st.rerun()
+        for n, item in enumerate(follows):
+            c1, c2 = st.columns([5, 1], vertical_alignment="center")
+            url = substack.feed_url(item) or ""
+            c1.markdown(f"[{esc(item)}]({url.removesuffix('/feed')})")
+            if c2.button("Remove", key=f"ss-rm-{n}", width="stretch"):
+                settings_svc.save(uid, substack_feeds=[f for f in follows if f != item])
                 st.cache_data.clear()
-                st.success(f"Added {len(merged) - len(follows)} newsletters ({len(merged)} in all).")
                 st.rerun()
-        with st.form("ss-list", border=False):
-            text = st.text_area("Newsletters", value="\n".join(follows), height=180, label_visibility="collapsed",
-                                placeholder="thegeneralist\nnetinterest.co")
-            if st.form_submit_button("Save list"):
-                items = [line.strip() for line in text.splitlines() if line.strip()][:150]
-                good = [i for i in items if substack.feed_url(i)]
-                bad = [i for i in items if not substack.feed_url(i)]
-                settings_svc.save(uid, substack_feeds=good)
-                st.cache_data.clear()
-                st.success(f"Saved {len(good)} newsletters." + (f" Skipped: {', '.join(bad)}." if bad else ""))
-                st.rerun()
+        with st.popover("Add many at once", icon=":material/playlist_add:"):
+            with st.form("ss-list", border=False):
+                text = st.text_area("One per line", height=160, placeholder="thegeneralist\nnetinterest.co")
+                if st.form_submit_button("Add all"):
+                    added, bad = [], []
+                    for line in [x.strip() for x in text.splitlines() if x.strip()][:100]:
+                        value = substack.resolve(line)[0] if line.startswith("@") or "substack.com/@" in line else line
+                        (added if value and substack.feed_url(value) else bad).append(value or line)
+                    settings_svc.save(uid, substack_feeds=list(dict.fromkeys(follows + added))[:150])
+                    st.cache_data.clear()
+                    st.success(f"Added {len(added)}." + (f" Skipped: {', '.join(bad)}." if bad else ""))
+                    st.rerun()
 
 
 def page() -> None:

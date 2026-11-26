@@ -141,7 +141,9 @@ class MayaWebSource(FilingSource):
         return hits[:limit]
 
     def external_links(self, company: Company) -> list[tuple[str, str]]:
-        return [("MAYA company page", f"https://maya.tase.co.il/company/{company.source_id}")]
+        from urllib.parse import quote
+        return [("MAYA reports (Hebrew)", f"https://maya.tase.co.il/he/reports/search?freeText={quote(company.name_en)}"),
+                ("MAYA company page", f"https://maya.tase.co.il/company/{company.source_id}")]
 
     # ---- reports --------------------------------------------------------
     def list_filings(self, company: Company, start: date, end: date) -> list[Filing]:

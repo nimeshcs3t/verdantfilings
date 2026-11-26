@@ -15,7 +15,7 @@ def _show_codes(codes: list[str]) -> None:
     st.warning("Save these backup codes somewhere safe (a password manager or printed). Each works once if you lose "
                "your phone. They won't be shown again.")
     st.code("\n".join(codes), language=None)
-    st.download_button("Download codes (.txt)", "Verdant Filings backup codes\n\n" + "\n".join(codes) + "\n",
+    st.download_button("Download codes (.txt)", "Verdant Terminal backup codes\n\n" + "\n".join(codes) + "\n",
                        file_name="verdant-backup-codes.txt", mime="text/plain")
 
 

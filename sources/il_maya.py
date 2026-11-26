@@ -27,6 +27,7 @@ from .kr_dart import tidy_english_name
 log = logging.getLogger(__name__)
 COMPANY_LIST = "https://api.tase.co.il/api/content/searchentities"
 REPORTS = "https://mayaapi.tase.co.il/api/company/reports"
+FIN_REPORTS = "https://mayaapi.tase.co.il/api/company/financereports"   # quarterly and annual statements
 REPORT_PAGE = "https://maya.tase.co.il/reports/details/{}"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                          "Chrome/140.0.0.0 Safari/537.36",
@@ -79,7 +80,7 @@ class MayaWebSource(FilingSource):
         set_state("maya_blocked_until", until.isoformat())
         log.warning("MAYA refused a request (%s); Israel paused for %d hours", reason, BLOCK_HOURS)
 
-    def _get(self, url: str, params: dict, referer: str) -> dict | list:
+    def _get(self, url: str, params: dict, referer: str, optional: bool = False) -> dict | list:
         if self.blocked_until():
             raise SourceBusy("MAYA paused")
         if self._session is None:
@@ -90,9 +91,16 @@ class MayaWebSource(FilingSource):
             time.sleep(wait)
         self._last_call = time.time()
         r = self._session.get(url, params=params, headers={"Referer": referer}, timeout=60)
-        if r.status_code in (401, 403, 429) or "json" not in (r.headers.get("content-type") or ""):
+        if r.status_code in (401, 403, 429):
             self._block(f"status {r.status_code}")
             raise SourceBusy("MAYA refused the request")
+        if "json" not in (r.headers.get("content-type") or ""):
+            if optional:                       # an extra list that may not exist: skip it, don't pause Israel
+                return {}
+            self._block(f"status {r.status_code}, not JSON")
+            raise SourceBusy("MAYA refused the request")
+        if optional and r.status_code >= 400:
+            return {}
         r.raise_for_status()
         return r.json()
 
@@ -137,34 +145,84 @@ class MayaWebSource(FilingSource):
 
     # ---- reports --------------------------------------------------------
     def list_filings(self, company: Company, start: date, end: date) -> list[Filing]:
-        out = []
+        """Every report in the Hebrew view (many are never published in English), plus the financial statements
+        list, where quarterly and annual results are filed."""
+        out, seen = [], set()
         for page in range(1, MAX_PAGES + 1):
             data = self._get(REPORTS, {"companyId": company.source_id, **({"page": page} if page > 1 else {})},
-                             "https://maya.tase.co.il/")
-            reports = data.get("Reports") or []
+                             f"https://maya.tase.co.il/company/{company.source_id}")
+            reports = data.get("Reports") or [] if isinstance(data, dict) else []
             oldest = None
             for rep in reports:
-                site = ((rep.get("FormalCompanyData") or {}).get("URL") or "").strip()
-                if site:
-                    self.websites[company.source_id] = site
-                try:
-                    published = datetime.fromisoformat(str(rep.get("PubDate"))[:19]).date()
-                except ValueError:
-                    continue
-                oldest = published if oldest is None else min(oldest, published)
-                if not start <= published <= end or not rep.get("RptCode"):
-                    continue
-                subject = re.sub(r"\s+", " ", rep.get("Subject") or "").strip() or "Company report"
-                english = subject if subject.isascii() or not re.search(r"[\u0590-\u05FF]", subject) else ""
-                out.append(Filing(uid=f"IL:{rep['RptCode']}", market=self.market, ticker=company.ticker,
-                                  company_name=company.name_en, filed_date=published, title_local=subject,
-                                  filer=company.name_local, url=REPORT_PAGE.format(rep["RptCode"]), title_en=english))
+                f, published = self._filing(rep, company, start, end)
+                if published:
+                    oldest = published if oldest is None else min(oldest, published)
+                if f and f.uid not in seen:
+                    seen.add(f.uid)
+                    out.append(f)
             if not reports or (oldest and oldest < start) or page >= int(data.get("TotalPages") or 1):
                 break
+        try:
+            data = self._get(FIN_REPORTS, {"companyId": company.source_id, "lang": 0},
+                             f"https://maya.tase.co.il/company/{company.source_id}?view=finance", optional=True)
+            for rep in _report_dicts(data):
+                f, _ = self._filing(rep, company, start, end, default_title="Financial statements")
+                if f and f.uid not in seen:
+                    seen.add(f.uid)
+                    out.append(f)
+        except SourceBusy:
+            raise
+        except Exception as exc:                # the extra list is a bonus; the main list already worked
+            log.info("MAYA financial reports list skipped for %s: %s", company.ticker, exc)
         return out
+
+    def _filing(self, rep: dict, company: Company, start: date, end: date,
+                default_title: str = "Company report") -> tuple[Filing | None, date | None]:
+        site = ((rep.get("FormalCompanyData") or {}).get("URL") or "").strip() if isinstance(rep.get("FormalCompanyData"), dict) else ""
+        if site:
+            self.websites[company.source_id] = site
+        code = _first(rep, ("RptCode", "ReportCode", "ReportId", "RptId", "Id"))
+        raw_date = _first(rep, ("PubDate", "PublicationDate", "PublishDate", "ReportDate", "Date"))
+        try:
+            published = datetime.fromisoformat(str(raw_date)[:19]).date()
+        except (TypeError, ValueError):
+            return None, None
+        if not code or not start <= published <= end:
+            return None, published
+        subject = re.sub(r"\s+", " ", str(_first(rep, ("Subject", "Title", "ReportName", "Name", "Description",
+                                                         "PeriodDesc")) or "")).strip() or default_title
+        english = subject if not re.search(r"[\u0590-\u05FF]", subject) else ""
+        return Filing(uid=f"IL:{code}", market=self.market, ticker=company.ticker, company_name=company.name_en,
+                      filed_date=published, title_local=subject, filer=company.name_local,
+                      url=REPORT_PAGE.format(code), title_en=english), published
 
     def fetch_document_text(self, uid: str) -> str:
         return ""     # report documents aren't read yet; titles and links only
+
+
+def _first(item: dict, keys) -> object:
+    lowered = {str(k).lower(): v for k, v in item.items()}
+    for k in keys:
+        v = lowered.get(k.lower())
+        if v not in (None, ""):
+            return v
+    return None
+
+
+def _report_dicts(data) -> list[dict]:
+    """Report-like objects anywhere in a response whose exact shape isn't documented."""
+    found = []
+    if isinstance(data, list):
+        for d in data:
+            found += _report_dicts(d)
+    elif isinstance(data, dict):
+        if _first(data, ("RptCode", "ReportCode", "ReportId", "RptId")) and _first(
+                data, ("PubDate", "PublicationDate", "PublishDate", "ReportDate", "Date")):
+            return [data]
+        for v in data.values():
+            if isinstance(v, (list, dict)):
+                found += _report_dicts(v)
+    return found
 
 
 def _probe() -> None:

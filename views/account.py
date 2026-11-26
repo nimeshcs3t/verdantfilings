@@ -65,7 +65,7 @@ def page() -> None:
     data_section(user)
 
     st.subheader("Install on your phone", divider=False)
-    st.markdown("Use Verdant Filings like a normal app, with its own icon and full screen:\n\n"
+    st.markdown("Use Verdant Terminal like a normal app, with its own icon and full screen:\n\n"
                 "- **iPhone / iPad (Safari):** open the app, tap the Share button, then **Add to Home Screen**.\n"
                 "- **Android (Chrome):** open the app, tap the ⋮ menu, then **Install app** (or **Add to Home screen**).\n"
                 "- **Computer (Chrome or Edge):** click the install icon at the right of the address bar.\n\n"
@@ -145,7 +145,7 @@ def delivery_settings(user: dict) -> None:
                 settings_svc.save(user["id"], email=address.strip(), email_alerts=alerts, email_briefs=briefs)
                 st.success("Saved.")
     if prefs.get("email") and emailer.enabled() and st.button("Send a test email"):
-        ok = emailer.send(prefs["email"], "Verdant Filings test", "<p>Email delivery works.</p>")
+        ok = emailer.send(prefs["email"], "Verdant Terminal test", "<p>Email delivery works.</p>")
         st.success("Sent. Check your inbox (and spam folder).") if ok else st.error("Couldn't send. Check the SMTP secrets.")
 
     st.subheader("Briefings and reports", divider=False)
@@ -167,7 +167,8 @@ def delivery_settings(user: dict) -> None:
             st.success("Saved.")
 
     st.subheader("Substack", divider=False)
-    st.caption("Newsletters you read. Their posts that mention your companies appear first on each company's News tab "
+    st.caption("Newsletters you read (the Substack page lists all their posts and can import your list from Substack). "
+               "Posts that mention your companies also appear on each company's News tab "
                "(Substack). One per line: the newsletter name from its address (e.g. 'thegeneralist' for "
                "thegeneralist.substack.com) or its own web address.")
     with st.form("substack-settings", border=False):
@@ -176,7 +177,7 @@ def delivery_settings(user: dict) -> None:
                             placeholder="thegeneralist\nhttps://www.netinterest.co")
         if st.form_submit_button("Save newsletters"):
             from services.substack import feed_url
-            items = [line.strip() for line in text.splitlines() if line.strip()][:30]
+            items = [line.strip() for line in text.splitlines() if line.strip()][:150]
             bad = [i for i in items if not feed_url(i)]
             settings_svc.save(user["id"], substack_feeds=[i for i in items if feed_url(i)])
             st.success(f"Saved {len(items) - len(bad)} newsletter{'s' if len(items) - len(bad) != 1 else ''}."

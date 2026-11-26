@@ -59,16 +59,22 @@ def page() -> None:
     if df.empty:
         st.caption(f"No filings in the {period.lower()} for these companies.")
         return
-    c4, c5, c6 = st.columns([1.6, 1.6, 1])
+    c4, c5, c6 = st.columns([1.4, 1.4, 1.2])
     types = c4.multiselect("Types", sorted(df["Type"].unique()), placeholder="All types", key="af-types")
     companies = c5.multiselect("Companies", sorted(df["Company"].unique()), placeholder="All companies", key="af-cos")
-    only_flagged = c6.toggle("Flagged only", key="af-flag")
+    flags = c6.pills("Show only flagged", ["Important", "Keep", "Read once"], selection_mode="multi", key="af-flags",
+                     help="Pick one or more to see only filings you marked that way.")
+    hide_insider = st.toggle("Hide insider trades", key="af-noins",
+                             help="Leaves out Form 4s, director dealings and other insider filings. They're all on the "
+                                  "Insiders page.")
     if types:
         df = df[df["Type"].isin(types)]
     if companies:
         df = df[df["Company"].isin(companies)]
-    if only_flagged:
-        df = df[df["Flag"] != ""]
+    if flags:
+        df = df[df["Flag"].isin(flags)]
+    if hide_insider:
+        df = df[df["Type"] != label("insider")]
     if q.strip():
         t = q.strip().lower()
         df = df[df["Title"].str.lower().str.contains(t, regex=False) | df["Original title"].str.lower().str.contains(t, regex=False)]

@@ -263,7 +263,7 @@ def page() -> None:
             with st.spinner("Looking for Substack posts"):
                 render_substack(cached_substack(comp["name_en"], comp["ticker"], follows))
         else:
-            render_news(cached_english_news(comp["name_en"], comp["ticker"]))
+            render_news(cached_english_news(comp["name_en"], comp["ticker"], 15, market))
 
     with tab_chat:
         discussion(market, comp["ticker"], user)

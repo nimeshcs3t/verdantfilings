@@ -17,7 +17,7 @@ def _brand(sub: str = "Company filings from regulators, in English, the day they
 
 def _second_factor(pending: dict) -> None:
     _brand("Two-factor sign-in")
-    st.write("Open your authenticator app and enter the 6-digit code for Verdant Filings. "
+    st.write("Open your authenticator app and enter the 6-digit code for Verdant Terminal. "
              "Lost your phone? Enter one of your backup codes instead.")
     with st.form("signin-2fa"):
         code = st.text_input("Code", max_chars=12, autocomplete="one-time-code", placeholder="123456")

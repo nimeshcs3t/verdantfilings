@@ -39,10 +39,44 @@ def performance_svg(portfolio: list[tuple[date, float]], benchmark: list[tuple[d
     zero = f'<line x1="{pad_l}" x2="{w - pad_r}" y1="{y(0):.1f}" y2="{y(0):.1f}" class="zero"/>'
     bench_line = f'<polyline class="bench" fill="none" points="{line(bpts)}"/>' if bpts else ""
     legend_b = (f'<span><i class="sw bench"></i>{esc(bench_name)} {bpts[-1][1] * 100:+.1f}%</span>' if bpts else "")
+    hover = _hover(pts, bpts, bench_name, x, y, w, h)
     return (f'<div class="perf"><div class="perf-legend"><span><i class="sw port"></i>Portfolio {pts[-1][1] * 100:+.1f}%</span>'
             f'{legend_b}<span class="perf-range">{pts[0][0]:%d %b %Y} to {pts[-1][0]:%d %b %Y}{" (closing prices)" if len(pts) == 2 else ""}</span></div>'
-            f'<svg viewBox="0 0 {w} {h}" preserveAspectRatio="none" role="img" aria-label="Portfolio return versus benchmark">'
-            f'{"".join(grid)}{zero}{bench_line}<polyline class="port" fill="none" points="{line(pts)}"/></svg></div>')
+            f'<div class="perf-plot"><svg viewBox="0 0 {w} {h}" preserveAspectRatio="none" role="img" aria-label="Portfolio return versus benchmark">'
+            f'{"".join(grid)}{zero}{bench_line}<polyline class="port" fill="none" points="{line(pts)}"/></svg>{hover}</div></div>')
+
+
+def _hover(pts, bpts, bench_name, x, y, w, h, most: int = 180) -> str:
+    """Point at any date to read both returns: invisible strips over the chart, one per day (thinned to `most`),
+    each showing a guide line, a dot and a label while hovered or tapped. Plain HTML and CSS, no script."""
+    if len(pts) < 2:
+        return ""
+    step = max(1, math.ceil(len(pts) / most))
+    shown = pts[::step]
+    if shown[-1] != pts[-1]:
+        shown.append(pts[-1])
+    bench = sorted(bpts)
+    bi, bval = 0, None
+    xs = [x(d) for d, _ in shown]
+    out = []
+    for i, (d, v) in enumerate(shown):
+        while bi < len(bench) and bench[bi][0] <= d:
+            bval = bench[bi][1]
+            bi += 1
+        left = (xs[i - 1] + xs[i]) / 2 if i else xs[i]
+        right = (xs[i] + xs[i + 1]) / 2 if i + 1 < len(xs) else xs[i]
+        if right - left < 0.5:
+            right = left + 0.5
+        lp, wp = left / w * 100, (right - left) / w * 100
+        at = (xs[i] - left) / (right - left) * 100
+        side = "r" if xs[i] > w * 0.6 else "l"
+        b = (f'<span class="b">{esc(bench_name)} {bval * 100:+.2f}%</span>' if bval is not None else "")
+        cls = "up" if v > 0 else "down" if v < 0 else ""
+        out.append(f'<div class="hs" style="left:{lp:.3f}%;width:{wp:.3f}%"><i class="hl" style="left:{at:.1f}%"></i>'
+                   f'<b class="pd" style="left:{at:.1f}%;top:{y(v) / h * 100:.2f}%"></b>'
+                   f'<div class="tip {side}" style="left:{at:.1f}%"><span class="d">{d:%a %d %b %Y}</span>'
+                   f'<span class="p {cls}">Portfolio {v * 100:+.2f}%</span>{b}</div></div>')
+    return f'<div class="hov">{"".join(out)}</div>'
 
 
 def _nice_step(span: float) -> float:

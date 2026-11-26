@@ -222,8 +222,19 @@ def _add(user: dict, market: str, ticker: str) -> None:
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def cached_english_news(name_en: str, ticker: str, limit: int = 10) -> list[dict]:
-    return news.english_news(name_en, ticker, limit)
+def cached_english_news(name_en: str, ticker: str, limit: int = 10, market: str = "") -> list[dict]:
+    """Google News, plus Yahoo Finance's feed for the share when the market is known."""
+    return news.company_news(name_en, ticker, market, limit)
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def cached_defence_news(region: str = "All") -> list[dict]:
+    return news.defence_news(region)
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def cached_market_news(region: str = "All") -> list[dict]:
+    return news.market_news(region)
 
 
 @st.cache_data(ttl=1800, show_spinner=False)

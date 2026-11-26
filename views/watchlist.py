@@ -42,6 +42,9 @@ def my_list() -> None:
                 wl = [w for w in wl if (w["market"], w["ticker"]) in keep]
     levels = personal.levels(user["id"])
     hist = histories([(w["market"], w["ticker"]) for w in wl])
+    from views.insiders_page import shares_out
+    from services.valuation import count as fmt_count
+    outstanding = shares_out({(w["market"], w["ticker"]) for w in wl})
     for w in wl:
         pair = (w["market"], w["ticker"])
         h = hist.get(pair) or []
@@ -50,7 +53,9 @@ def my_list() -> None:
         c1.markdown(f'<div class="fl-co">{logo_html(w["name_en"], w["ticker"], market=w["market"])}{esc(w["name_en"])}'
                     f'<span class="fl-tk">{esc(w["ticker"])}</span>{country}</div>'
                     f'<div class="fl-orig ko" style="margin-left:33px">'
-                    f'{esc(w["name_local"]) if w["name_local"] != w["name_en"] else ""}</div>'
+                    f'{esc(w["name_local"]) if w["name_local"] != w["name_en"] else ""}'
+                    f'{" · " if w["name_local"] != w["name_en"] and outstanding.get(pair) else ""}'
+                    f'{fmt_count(outstanding[pair]) + " shares" if outstanding.get(pair) else ""}</div>'
                     + (f'<div class="grp-line">{groups_html(assigned.get(pair))}</div>' if assigned.get(pair) else ""),
                     unsafe_allow_html=True)
         if h:

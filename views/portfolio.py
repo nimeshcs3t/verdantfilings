@@ -940,4 +940,4 @@ def share_page(user_id: int) -> None:
                     f'<td class="num">{r["weight"] * 100:.1f}%</td><td class="num">{_pct(r.get("gain_pct")) if not r.get("is_cash") else "–"}</td></tr>'
                     for r in rows)
     html_block(f'<div class="tbl-wrap"><table class="tbl"><tr><th>Holding</th><th class="num">Weight</th><th class="num">Gain</th></tr>{lines}</table></div>')
-    st.caption("Shared from Verdant Filings. Returns are on the money invested; prices may be delayed.")
+    st.caption("Shared from Verdant Terminal. Returns are on the money invested; prices may be delayed.")

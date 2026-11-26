@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy import select
 
-from core.db import filings, get_engine, insider_tx
+from core.db import company_meta, filings, get_engine, insider_tx
 from core.ui import html_block, page_header
 from services import personal
 from services.classify import categorize
@@ -19,6 +19,43 @@ from .filings import SCOPES, _pairs
 PERIODS = {"Last 30 days": 30, "Last 90 days": 90, "Last 6 months": 182, "Last 12 months": 365, "Last 2 years": 730}
 CODES = {"P": "Buy", "S": "Sell", "A": "Grant / award", "M": "Option exercise", "X": "Option exercise", "F": "Tax withholding",
          "G": "Gift", "D": "Returned to company", "C": "Conversion", "J": "Other", "+": "Increase", "-": "Decrease"}
+
+
+SYMBOL = {"USD": "$", "EUR": "€", "KRW": "₩", "GBP": "£", "JPY": "¥", "ILS": "₪", "AUD": "A$", "HKD": "HK$", "CHF": "CHF ",
+          "SEK": "SEK ", "NOK": "NOK ", "DKK": "DKK ", "PLN": "PLN ", "TWD": "NT$", "ISK": "ISK "}
+VERBS = {"P": "bought", "S": "sold", "A": "was granted", "M": "exercised options for", "X": "exercised options for",
+         "F": "handed back for tax", "G": "gifted", "D": "returned to the company", "C": "converted",
+         "+": "added", "-": "reduced holding by"}
+
+
+def money(market: str, price: float | None) -> str:
+    from services.portfolio import CURRENCY
+    if not price:
+        return ""
+    cur = CURRENCY.get(market, "")
+    sym = SYMBOL.get(cur, f"{cur} " if cur else "")
+    return f"{sym}{price:,.0f}" if price >= 1000 else f"{sym}{price:,.2f}"
+
+
+def sentence(market: str, person: str, role: str, code: str, shares: float | None, price: float | None,
+             shares_out: float | None = None) -> str:
+    """'CFO bought 2,000 shares at $56.00 (0.01% of shares)'."""
+    who = (role or "").strip() or (person or "").strip() or "An insider"
+    if role and person and len(role) <= 12:
+        who = f"{role} {person}"
+    verb = VERBS.get(code or "", "traded")
+    n = f"{shares:,.0f} shares" if shares else "shares"
+    at = f" at {money(market, price)}" if price else ""
+    share = shares / shares_out * 100 if shares and shares_out else 0
+    pct = f" ({share:.2f}% of shares)" if share >= 0.01 else ""
+    return f"{who} {verb} {n}{at}{pct}"
+
+
+def shares_out(pairs) -> dict:
+    with get_engine().connect() as conn:
+        rows = conn.execute(select(company_meta.c.market, company_meta.c.ticker, company_meta.c.shares)
+                            .where(company_meta.c.shares.is_not(None))).all()
+    return {(m, t): sh for m, t, sh in rows if (m, t) in pairs and sh}
 
 
 def _trades(pairs: dict, since: date) -> pd.DataFrame:
@@ -31,6 +68,7 @@ def _trades(pairs: dict, since: date) -> pd.DataFrame:
             .where(insider_tx.c.market.in_(markets), insider_tx.c.seq >= 0, insider_tx.c.tx_date >= since)
             .order_by(insider_tx.c.tx_date.desc())).mappings().all()
     data = []
+    outstanding = shares_out(pairs)
     for r in rows:
         key = (r["market"], r["ticker"])
         if key not in pairs:
@@ -39,10 +77,18 @@ def _trades(pairs: dict, since: date) -> pd.DataFrame:
         if value and r["code"] in ("S", "-", "F", "D"):
             value = -abs(value)
         data.append({"Date": r["tx_date"], "Company": pairs[key], "Ticker": r["ticker"], "Market": r["market"],
+                     "What happened": sentence(r["market"], r["person"], r["role"], r["code"], r["shares"], r["price"],
+                                               outstanding.get(key)),
                      "Person": r["person"] or "", "Role": r["role"] or "", "Type": CODES.get(r["code"] or "", r["code"] or ""),
                      "Shares": r["shares"], "Price": r["price"], "Value": value, "Holding after": r["after"],
+                     "Shares outstanding": outstanding.get(key),
+                     "% of shares": (r["shares"] / outstanding[key] * 100) if r["shares"] and outstanding.get(key) else None,
                      "Filing": r["url"] or None, "_uid": r["uid"]})
-    return pd.DataFrame(data)
+    df = pd.DataFrame(data)
+    for col in ("Shares outstanding", "% of shares", "Price", "Value", "Holding after", "Shares"):
+        if col in df:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
 
 
 def _insider_filings(pairs: dict, since: date, parsed_uids: set[str]) -> pd.DataFrame:
@@ -130,6 +176,9 @@ def page() -> None:
                                     "Price": st.column_config.NumberColumn(format="%,.2f"),
                                     "Value": st.column_config.NumberColumn(format="compact"),
                                     "Holding after": st.column_config.NumberColumn(format="compact"),
+                                    "What happened": st.column_config.TextColumn(width="large"),
+                                    "Shares outstanding": st.column_config.NumberColumn(format="compact"),
+                                    "% of shares": st.column_config.NumberColumn(format="%.3f%%"),
                                     "Filing": st.column_config.LinkColumn(display_text="Open")})
     else:
         st.caption("No parsed insider trades for these companies in this period. Parsed trades come from US Form 4 "

@@ -11,7 +11,8 @@ from services.classify import ORDER, categorize, label
 from services.pipeline import filings_for, sync_company
 from sources import get_source
 
-from .components import add_company_form, cached_english_news, histories, render_filing, render_news
+from .components import (add_company_form, cached_defence_news, cached_english_news, cached_market_news, histories,
+                         render_filing, render_news)
 
 PERIODS = {"Last 3 days": 2, "Today": 0, "Last 7 days": 6, "Last 30 days": 29}   # days before today
 
@@ -144,16 +145,26 @@ def page() -> None:
                 f'<div class="ev-row"><b>{e["event_date"]:%d %b}</b>{esc(e["label"])} <span>{esc(e["company_name"])}</span></div>'
                 for e in coming[:8]))
         html_block('<div class="section" style="margin-top:.2rem">Headlines</div>')
-        names = {"All companies": None, **{f'{w["name_en"]} ({w["ticker"]})': w for w in all_wl}}
-        pick = names[st.selectbox("Headlines for", list(names), key="today-news-co", label_visibility="collapsed")]
-        items = []
-        if pick:
-            items = cached_english_news(pick["name_en"], pick["ticker"], 15)
+        feed = st.segmented_control("Headlines", ["Mine", "Defence", "Markets"], default="Mine", key="today-news-kind",
+                                    label_visibility="collapsed") or "Mine"
+        if feed == "Mine":
+            names = {"All companies": None, **{f'{w["name_en"]} ({w["ticker"]})': w for w in all_wl}}
+            pick = names[st.selectbox("Headlines for", list(names), key="today-news-co", label_visibility="collapsed")]
+            items = []
+            if pick:
+                items = cached_english_news(pick["name_en"], pick["ticker"], 15, pick["market"])
+            else:
+                for w in all_wl[:8]:
+                    items += cached_english_news(w["name_en"], w["ticker"], 6, w["market"])[:2]
+            items.sort(key=lambda n: n["published"].timestamp() if n.get("published") else 0, reverse=True)
+            render_news(items[:10])
         else:
-            for w in all_wl[:6]:
-                items += cached_english_news(w["name_en"], w["ticker"], 3)[:2]
-        items.sort(key=lambda n: n["published"].timestamp() if n.get("published") else 0, reverse=True)
-        render_news(items[:10])
+            regions = ["All", "US", "Europe", "Israel", "Korea"] + (["Japan", "Australia"] if feed == "Markets" else [])
+            region = st.selectbox("Region", regions, key=f"today-news-{feed}", label_visibility="collapsed")
+            with st.spinner("Loading headlines"):
+                items = cached_defence_news(region) if feed == "Defence" else cached_market_news(region)
+            render_news(items[:12])
+            st.caption("More on the News page.")
 
 
 def monitor(user: dict, wl: list[dict], rows: list[dict], period: str) -> None:
@@ -193,15 +204,13 @@ def monitor(user: dict, wl: list[dict], rows: list[dict], period: str) -> None:
         for _, t in tr.head(14).iterrows():
             kind = t["Type"]
             cls = "buy" if kind in ("Buy", "Increase") else "sell" if kind in ("Sell", "Decrease") else "dim"
-            val = t["Value"]
-            vtxt = "" if val is None or val != val else f"{val / 1e6:+,.2f}m" if abs(val) >= 1e6 else f"{val / 1e3:+,.0f}k"
-            who = (t["Person"] or "")[:18]
-            trs += (f'<tr><td class="l dim">{t["Date"]:%d %b}</td><td class="l tk">{open_link(t["Market"], t["Ticker"], t["Ticker"])}</td>'
-                    f'<td class="l"><span class="nm" style="max-width:96px">{esc(who)}</span></td>'
-                    f'<td class="l {cls}">{esc(kind[:10])}</td><td>{(t["Shares"] or 0):,.0f}</td><td class="{cls}">{vtxt}</td></tr>')
+            what = t["What happened"]
+            trs += (f'<tr title="{esc(what)}"><td class="l dim">{t["Date"]:%d %b}</td>'
+                    f'<td class="l tk">{open_link(t["Market"], t["Ticker"], t["Ticker"])}</td>'
+                    f'<td class="l {cls}" style="white-space:normal">{esc(what)}</td></tr>')
         markup += (f'<div class="pane-h" style="margin-top:14px">Insider trades<span>30 days · {buys} buys / {sells} sells</span></div>'
-                   '<div class="mon-wrap"><table class="mon"><tr><th class="l">Date</th><th class="l">Ticker</th><th class="l">Person</th>'
-                   f'<th class="l">Type</th><th>Shares</th><th title="In the share\'s own currency">Value</th></tr>{trs}</table></div>')
+                   '<div class="mon-wrap"><table class="mon"><tr><th class="l">Date</th><th class="l">Ticker</th>'
+                   f'<th class="l">What happened</th></tr>{trs}</table></div>')
     else:
         markup += ('<div class="pane-h" style="margin-top:14px">Insider trades<span>30 days</span></div>'
                    '<div class="dim" style="font-size:.78rem;color:var(--muted)">No parsed insider trades in the last 30 days. '

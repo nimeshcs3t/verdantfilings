@@ -130,6 +130,27 @@ def page() -> None:
     since = date.today() - timedelta(days=PERIODS[period])
     trades = _trades(pairs, since)
     other = _insider_filings(pairs, since, set(trades["_uid"]) if not trades.empty else set())
+    readable = other[other["Market"].isin(["US", "KR"])] if not other.empty else other
+    if not readable.empty:
+        with get_engine().connect() as conn:
+            done = set(conn.execute(select(insider_tx.c.uid).where(insider_tx.c.uid.in_(list(readable["_uid"])))).scalars())
+        readable = readable[~readable["_uid"].isin(done)]
+    if not readable.empty:                     # US Form 4s and Korean reports the worker hasn't read yet: read them now
+        us = [u for u in readable[readable["Market"] == "US"]["_uid"]]
+        kr = set(readable[readable["Market"] == "KR"]["Ticker"])
+        tried = st.session_state.setdefault("it-tried", set())
+        fresh_us = [u for u in us if u not in tried][:12]
+        fresh_kr = {t for t in kr if ("KR", t) not in tried}
+        if fresh_us or fresh_kr:
+            from services import insiders as insider_svc
+            with st.spinner(f"Reading {len(fresh_us) + len(fresh_kr)} insider filings"):
+                try:
+                    insider_svc.read_now(fresh_us, fresh_kr)
+                except Exception as exc:
+                    st.caption(f"Some insider filings couldn't be read just now ({exc.__class__.__name__}).")
+            tried.update(fresh_us)
+            tried.update(("KR", t) for t in fresh_kr)
+            st.rerun()
 
     prefs = personal.get_prefs(uid)
     hide = st.toggle("Keep insider filings off Today and alerts (they're all here instead)",
@@ -170,7 +191,8 @@ def page() -> None:
         if who.strip():
             w = who.strip().lower()
             shown = shown[shown["Person"].str.lower().str.contains(w, regex=False) | shown["Company"].str.lower().str.contains(w, regex=False)]
-        st.dataframe(shown.drop(columns=["_uid"]), hide_index=True, width="stretch", height=min(35 * (len(shown) + 1) + 3, 640),
+        empty = [c for c in ("Shares outstanding", "% of shares") if c in shown and shown[c].isna().all()]
+        st.dataframe(shown.drop(columns=["_uid", *empty]), hide_index=True, width="stretch", height=min(35 * (len(shown) + 1) + 3, 640),
                      column_config={"Date": st.column_config.DateColumn(format="D MMM YYYY"),
                                     "Shares": st.column_config.NumberColumn(format="%,.0f"),
                                     "Price": st.column_config.NumberColumn(format="%,.2f"),

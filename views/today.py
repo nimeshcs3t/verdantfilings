@@ -11,7 +11,7 @@ from services.classify import ORDER, categorize, label
 from services.pipeline import filings_for, sync_company
 from sources import get_source
 
-from .components import (add_company_form, cached_defence_news, cached_english_news, cached_market_news, histories,
+from .components import (add_company_form, cached_defence_news, cached_english_news, histories,
                          render_filing, render_news)
 
 PERIODS = {"Last 3 days": 2, "Today": 0, "Last 7 days": 6, "Last 30 days": 29}   # days before today
@@ -145,26 +145,25 @@ def page() -> None:
                 f'<div class="ev-row"><b>{e["event_date"]:%d %b}</b>{esc(e["label"])} <span>{esc(e["company_name"])}</span></div>'
                 for e in coming[:8]))
         html_block('<div class="section" style="margin-top:.2rem">Headlines</div>')
-        feed = st.segmented_control("Headlines", ["Mine", "Defence", "Markets"], default="Mine", key="today-news-kind",
-                                    label_visibility="collapsed") or "Mine"
-        if feed == "Mine":
-            names = {"All companies": None, **{f'{w["name_en"]} ({w["ticker"]})': w for w in all_wl}}
-            pick = names[st.selectbox("Headlines for", list(names), key="today-news-co", label_visibility="collapsed")]
-            items = []
-            if pick:
-                items = cached_english_news(pick["name_en"], pick["ticker"], 15, pick["market"])
-            else:
-                for w in all_wl[:8]:
-                    items += cached_english_news(w["name_en"], w["ticker"], 6, w["market"])[:2]
-            items.sort(key=lambda n: n["published"].timestamp() if n.get("published") else 0, reverse=True)
-            render_news(items[:10])
-        else:
-            regions = ["All", "US", "Europe", "Israel", "Korea"] + (["Japan", "Australia"] if feed == "Markets" else [])
-            region = st.selectbox("Region", regions, key=f"today-news-{feed}", label_visibility="collapsed")
-            with st.spinner("Loading headlines"):
-                items = cached_defence_news(region) if feed == "Defence" else cached_market_news(region)
-            render_news(items[:12])
-            st.caption("More on the News page.")
+        feed = st.segmented_control("Headlines", ["All", "My companies", "Defence"], default="All",
+                                    key="today-news-kind", label_visibility="collapsed") or "All"
+        items = []
+        if feed in ("All", "My companies"):
+            for w in all_wl[:10]:
+                for i in cached_english_news(w["name_en"], w["ticker"], 6, w["market"])[:3]:
+                    items.append({**i, "source": f'{w["ticker"]} · {i.get("source") or ""}'})
+        if feed in ("All", "Defence"):
+            with st.spinner("Loading defence news"):
+                for i in cached_defence_news("All")[:25]:
+                    items.append({**i, "source": f'Defence {i.get("region") or ""} · {i.get("source") or ""}'.replace("  ", " ")})
+        seen, merged = set(), []
+        for i in sorted(items, key=lambda n: n["published"].timestamp() if n.get("published") else 0, reverse=True):
+            key = (i.get("title") or "").lower()[:80]
+            if key not in seen:
+                seen.add(key)
+                merged.append(i)
+        render_news(merged[:15])
+        st.caption("Your companies' news plus defence industry news (US, Europe, Israel, Korea). More on the News page.")
 
 
 def monitor(user: dict, wl: list[dict], rows: list[dict], period: str) -> None:

@@ -567,6 +567,10 @@ div[class*="st-key-flag-"] button p { font-size:.7rem !important; }
 .mon th.l, .mon td.l { text-align:left; } .mon tr:hover td { background:#0B0F11; }
 .mon td.tk { color:var(--pine); } .mon td.dim { color:var(--muted); }
 .mon-wrap { overflow-x:auto; }
+/* company links in Today's headlines */
+.co-links { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 8px; }
+.co-links a { font-size:.74rem; color:var(--cyan) !important; text-decoration:none; border:1px solid var(--rule-strong);
+  padding:2px 7px; } .co-links a:hover { border-color:var(--pine); color:var(--pine) !important; }
 /* bank reports */
 .bk { background:var(--card); border:1px solid var(--rule); padding:8px 10px; margin-bottom:8px; min-height:210px;
   display:flex; flex-direction:column; }

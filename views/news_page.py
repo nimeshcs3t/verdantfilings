@@ -5,7 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from core.ui import page_header
-from .components import cached_defence_news, cached_english_news, render_news
+from .components import cached_defence_news, cached_english_news, cached_tv10, render_news
 
 REGIONS = ["All", "US", "Europe", "Israel", "Korea"]
 
@@ -23,7 +23,7 @@ def _tagged(items: list[dict]) -> list[dict]:
 def page() -> None:
     user = st.session_state["user"]
     page_header("News", "Your companies and defence industry news by region")
-    kind = st.segmented_control("Show", ["Your companies", "Defence"], default="Your companies",
+    kind = st.segmented_control("Show", ["Your companies", "Defence", "Tel Aviv stocks"], default="Your companies",
                                 key="news-kind") or "Your companies"
     if kind == "Your companies":
         from .filings import _pairs
@@ -43,6 +43,12 @@ def page() -> None:
         items.sort(key=lambda n: n["published"].timestamp() if n.get("published") else 0, reverse=True)
         render_news(items[:80])
         st.caption("Sources: Google News and Yahoo Finance. Each company's page also has local-language news.")
+        return
+    if kind == "Tel Aviv stocks":
+        with st.spinner("Loading TV10"):
+            items = cached_tv10()
+        render_news([{**i, "source": "TV10 Global"} for i in items])
+        st.caption("From TV10 Global's TASE Stocks section (tv10.news), English news on Tel Aviv-listed companies.")
         return
     region = st.pills("Region", REGIONS, default="All", key="news-region") or "All"
     with st.spinner("Collecting headlines"):

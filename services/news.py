@@ -177,3 +177,35 @@ def market_news(region: str = "All", limit: int = 40) -> list[dict]:
             i["region"] = reg
         lists.append(items)
     return merge(*lists, limit=limit)
+
+
+# TV10 Global (tv10.news): English news on Tel Aviv-listed companies, from its "TASE Stocks" section.
+TV10_SECTION = "https://tv10.news/news/capital-market/tase-stocks/"
+TV10_FEED = "https://tv10.news/feed"
+
+
+def tv10_tase(limit: int = 30) -> list[dict]:
+    """The site's RSS feed, kept to the TASE stocks section; if the feed is empty, the section page itself."""
+    items = [i for i in rss(TV10_FEED, "TV10", limit=60) if "/tase-stocks/" in (i.get("link") or "")]
+    if not items:
+        try:
+            r = requests.get(TV10_SECTION, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"}, timeout=15)
+            r.raise_for_status()
+            seen = set()
+            for m in re.finditer(r'<a[^>]+href="((?:https://tv10\.news)?/news/capital-market/tase-stocks/(\d+)/[^"]+)"[^>]*>(.*?)</a>',
+                                 r.text, re.S):
+                url, art_id, inner = m.groups()
+                title = " ".join(re.sub(r"<[^>]+>", " ", inner).split())
+                if art_id in seen or len(title) < 12:
+                    continue
+                seen.add(art_id)
+                items.append({"title": title.replace("&amp;", "&").replace("&#x27;", "'"),
+                              "link": url if url.startswith("http") else "https://tv10.news" + url,
+                              "source": "TV10", "published": None, "_order": -int(art_id)})
+        except requests.RequestException:
+            return []
+        items.sort(key=lambda i: i["_order"])          # newer articles have higher numbers
+    for i in items:
+        i["source"], i["region"] = "TV10", "Israel"
+    return items[:limit]

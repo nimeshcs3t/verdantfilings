@@ -232,6 +232,11 @@ def cached_defence_news(region: str = "All") -> list[dict]:
     return news.defence_news(region)
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def cached_tv10() -> list[dict]:
+    return news.tv10_tase()
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def cached_market_news(region: str = "All") -> list[dict]:
     return news.market_news(region)

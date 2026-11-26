@@ -1,4 +1,5 @@
-from datetime import date, timedelta
+import re
+from datetime import date, datetime, timedelta, timezone
 
 import streamlit as st
 
@@ -11,7 +12,7 @@ from services.classify import ORDER, categorize, label
 from services.pipeline import filings_for, sync_company
 from sources import get_source
 
-from .components import (add_company_form, cached_defence_news, cached_english_news, histories,
+from .components import (add_company_form, cached_defence_news, cached_english_news, cached_tv10, histories,
                          render_filing, render_news)
 
 PERIODS = {"Last 3 days": 2, "Today": 0, "Last 7 days": 6, "Last 30 days": 29}   # days before today
@@ -145,7 +146,16 @@ def page() -> None:
                 f'<div class="ev-row"><b>{e["event_date"]:%d %b}</b>{esc(e["label"])} <span>{esc(e["company_name"])}</span></div>'
                 for e in coming[:8]))
         html_block('<div class="section" style="margin-top:.2rem">Headlines</div>')
-        feed = st.segmented_control("Headlines", ["All", "My companies", "Defence"], default="All",
+        from .filings import _pairs
+        pairs = _pairs(user["id"], ["watchlist", "portfolio", "ideas"])
+        options = {"All companies": None, **{f"{name} ({t})": (m, t, name) for (m, t), name in
+                                             sorted(pairs.items(), key=lambda kv: (kv[1] or "").lower())}}
+        chosen = options[st.selectbox("Company", list(options), key="today-news-co", label_visibility="collapsed",
+                                      help="Pick a company to see every article and link about it")]
+        if chosen:
+            company_headlines(user, *chosen)
+            return
+        feed = st.segmented_control("Headlines", ["All", "My companies", "Defence", "Israel"], default="All",
                                     key="today-news-kind", label_visibility="collapsed") or "All"
         items = []
         if feed in ("All", "My companies"):
@@ -156,14 +166,85 @@ def page() -> None:
             with st.spinner("Loading defence news"):
                 for i in cached_defence_news("All")[:25]:
                     items.append({**i, "source": f'Defence {i.get("region") or ""} · {i.get("source") or ""}'.replace("  ", " ")})
-        seen, merged = set(), []
-        for i in sorted(items, key=lambda n: n["published"].timestamp() if n.get("published") else 0, reverse=True):
-            key = (i.get("title") or "").lower()[:80]
-            if key not in seen:
-                seen.add(key)
-                merged.append(i)
-        render_news(merged[:15])
-        st.caption("Your companies' news plus defence industry news (US, Europe, Israel, Korea). More on the News page.")
+        if feed in ("All", "Israel"):
+            tv = cached_tv10()
+            for i in tv[:8 if feed == "All" else 25]:
+                items.append({**i, "source": "TASE · TV10"})
+        render_news(_dedupe(items)[:15])
+        st.caption("Your companies' news, defence industry news (US, Europe, Israel, Korea) and Tel Aviv stocks from "
+                   "TV10. Pick a company above for everything about it.")
+
+
+def _dedupe(items: list[dict]) -> list[dict]:
+    seen, merged = set(), []
+    undated = datetime.now(timezone.utc)          # TV10's section page gives no dates: treat as fresh
+    for i in sorted(items, key=lambda n: (n.get("published") or undated).timestamp(), reverse=True):
+        key = re.sub(r"[^a-z0-9]+", " ", (i.get("title") or "").lower()).strip()[:80]
+        if key and key not in seen:
+            seen.add(key)
+            merged.append(i)
+    return merged
+
+
+def company_headlines(user: dict, market: str, ticker: str, name: str) -> None:
+    """Everything about one company: its links, then every article found (English and local news, Yahoo Finance,
+    TV10 for Tel Aviv, Substack posts that mention it), newest first."""
+    from urllib.parse import quote_plus
+    from services import irwatch
+    from services import settings as settings_svc
+    from services.logos import website
+    from services.pipeline import get_company
+    from services.prices import SUFFIX
+    from sources.base import Company
+    from .components import cached_local_news, cached_substack
+    comp = get_company(market, ticker, resolve=False) or {"name_en": name, "name_local": name, "source_id": ticker}
+    name_en = comp.get("name_en") or name or ticker
+    src = get_source(market)
+    links = []
+    if src:
+        try:
+            links += src.external_links(Company(market, ticker, comp.get("source_id") or ticker,
+                                                comp.get("name_local") or name_en, name_en))
+        except Exception:
+            pass
+    site = website(market, ticker)
+    if site:
+        links.append(("Website", site))
+    watch_entry = irwatch.get(market, ticker)
+    if watch_entry:
+        links.append(("Investor page", watch_entry["url"]))
+    ysym = ticker if market == "US" else f"{ticker}{(SUFFIX.get(market) or [''])[0]}"
+    if market in SUFFIX:
+        links.append(("Yahoo Finance", f"https://finance.yahoo.com/quote/{quote_plus(ysym)}/news/"))
+    links.append(("Google News", f"https://news.google.com/search?q={quote_plus(chr(34) + name_en + chr(34))}"))
+    html_block('<div class="co-links">' + "".join(
+        f'<a href="{esc(u)}" target="_blank" rel="noopener noreferrer">{esc(label)} ↗</a>' for label, u in links) + "</div>")
+    if st.button(f"Open {name_en} in the app", key="today-news-open", icon=":material/arrow_outward:"):
+        from core import nav
+        nav.open_company(market, ticker)
+
+    items = []
+    with st.spinner(f"Collecting articles about {name_en}"):
+        for i in cached_english_news(name_en, ticker, 40, market):
+            items.append(i)
+        if comp.get("name_local") and comp.get("name_local") != name_en:
+            for i in cached_local_news(market, comp["name_local"], 20):
+                items.append({**i, "source": f'{i.get("source") or ""} · translated'.strip(" ·")})
+        first = next(iter(re.findall(r"[A-Za-z]{4,}", name_en)), "")     # TV10: Tel Aviv names, also dual listings
+        for i in cached_tv10() if first else []:
+            if re.search(rf"\b{re.escape(first)}\b", i["title"], re.I):
+                items.append({**i, "source": "TV10"})
+        follows = tuple(settings_svc.get(user["id"]).get("substack_feeds") or [])
+        try:
+            ss = cached_substack(name_en, ticker, follows)
+            for p in (ss["posts"] if isinstance(ss, dict) else ss)[:10]:
+                items.append({"title": p["title"], "link": p["link"], "published": p.get("published"),
+                              "source": f'Substack · {p.get("source") or ""}'.strip(" ·")})
+        except Exception:
+            pass
+    merged = _dedupe(items)
+    st.caption(f"{len(merged)} articles about {name_en}, newest first.")
+    render_news(merged[:60])
 
 
 def monitor(user: dict, wl: list[dict], rows: list[dict], period: str) -> None:

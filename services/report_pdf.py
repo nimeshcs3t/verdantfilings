@@ -42,7 +42,7 @@ class Report(FPDF):
             self.rect(0, 0, self.w, self.h, "F")
         self.set_font("Helvetica", "B", 9)
         self.set_text_color(*MUTED)
-        self.cell(0, 6, "Verdant Filings - monthly portfolio report", align="R")
+        self.cell(0, 6, "Verdant Terminal - monthly portfolio report", align="R")
         self.ln(8)
 
     def footer(self):

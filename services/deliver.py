@@ -27,7 +27,7 @@ EMAIL = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport
   .foot {{ color:#9AA6A0 !important; }}
  }}
  [data-ogsc] .card {{ background:#141A18 !important; }} [data-ogsc] .body {{ color:#E4E9E6 !important; }}
-</style></head><body><div class="wrap"><div class="card"><div class="bar">Verdant Filings</div>
+</style></head><body><div class="wrap"><div class="card"><div class="bar">Verdant Terminal</div>
 <div class="body">{body}</div><div class="foot">{foot}</div></div></div></body></html>"""
 
 

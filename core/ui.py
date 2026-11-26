@@ -567,6 +567,36 @@ div[class*="st-key-flag-"] button p { font-size:.7rem !important; }
 .mon th.l, .mon td.l { text-align:left; } .mon tr:hover td { background:#0B0F11; }
 .mon td.tk { color:var(--pine); } .mon td.dim { color:var(--muted); }
 .mon-wrap { overflow-x:auto; }
+/* bank reports */
+.bk { background:var(--card); border:1px solid var(--rule); padding:8px 10px; margin-bottom:8px; min-height:210px;
+  display:flex; flex-direction:column; }
+.bk-h { display:flex; justify-content:space-between; border-bottom:1px solid var(--rule); padding-bottom:4px; margin-bottom:6px; }
+.bk-h b { color:var(--pine); font-weight:600; } .bk-h span { color:var(--muted); font-size:.7rem; }
+.bk-item { display:flex; gap:10px; justify-content:space-between; padding:3px 0; border-bottom:1px solid #111517; font-size:.8rem; }
+.bk-item a { color:var(--ink); text-decoration:none; } .bk-item a:hover { color:var(--pine); }
+.bk-item span { color:var(--muted); white-space:nowrap; font-size:.72rem; }
+.bk-none { color:var(--muted); font-size:.78rem; flex:1; }
+.bk-open { margin-top:auto; padding-top:6px; font-size:.76rem; color:var(--cyan) !important; text-decoration:none; }
+/* substack */
+.ss-row { display:grid; grid-template-columns:62px 1fr; gap:12px; padding:7px 0; border-bottom:1px solid #111517; }
+.ss-row .d { color:var(--muted); font-size:.76rem; }
+.ss-row a { color:var(--ink); font-size:.9rem; text-decoration:none; } .ss-row a:hover { color:var(--pine); }
+.ss-row .pub { color:var(--cyan); font-size:.74rem; margin-top:2px; }
+.ss-row .sum { color:var(--muted); font-size:.78rem; margin-top:2px; }
+.ss-row .about { color:var(--pine); font-size:.7rem; border:1px solid var(--pine); padding:0 4px; margin-left:6px; }
+/* portfolio chart: point at a date to read the returns */
+.perf-plot { position:relative; }
+.perf .hov { position:absolute; inset:0; }
+.perf .hs { position:absolute; top:0; bottom:0; }
+.perf .hs > * { display:none; }
+.perf .hs:hover > * { display:block; }
+.perf .hl { position:absolute; top:0; bottom:0; width:1px; background:var(--rule-strong); pointer-events:none; }
+.perf .pd { position:absolute; width:7px; height:7px; margin:-3.5px 0 0 -3.5px; background:var(--pine); border-radius:50%; pointer-events:none; }
+.perf .tip { position:absolute; top:2px; z-index:5; white-space:nowrap; pointer-events:none; background:#07090A;
+  border:1px solid var(--rule-strong); padding:4px 8px; font-size:.74rem; line-height:1.45; }
+.perf .tip.l { margin-left:10px; } .perf .tip.r { transform:translateX(-100%); margin-left:-10px; }
+.perf .tip span { display:block; } .perf .tip .d { color:var(--muted); } .perf .tip .b { color:var(--muted); }
+.perf .tip .p { color:var(--ink); } .perf .tip .p.up { color:var(--up); } .perf .tip .p.down { color:var(--down); }
 .mon .nm { max-width:110px; overflow:hidden; text-overflow:ellipsis; display:inline-block; vertical-align:bottom; }
 .mon a.op { color:var(--pine); text-decoration:none; cursor:pointer; } .mon a.op:hover { text-decoration:underline; }
 .mon .buy { color:var(--up); } .mon .sell { color:var(--down); }

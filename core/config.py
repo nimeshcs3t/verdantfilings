@@ -20,7 +20,7 @@ def get_secret(key: str, default=None):
 
 
 def app_name() -> str:
-    return get_secret("APP_NAME", "Verdant Filings")
+    return get_secret("APP_NAME", "Verdant Terminal")
 
 
 def direct_fetch() -> bool:

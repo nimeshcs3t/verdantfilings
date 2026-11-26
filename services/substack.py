@@ -233,3 +233,65 @@ def diagnose(name: str, ticker: str, newsletters: list[str] | None = None) -> di
                       "title": title, "posts": len(entries),
                       "matching": sum(1 for e in entries if is_about(f"{e['title']} {e['summary']} {e['body']}"))})
     return {"short_name": short_name(name), "ticker_used": _ticker_ok(ticker), "search": report, "feeds": feeds}
+
+
+def all_posts(newsletters: list[str], days: int = 30) -> list[dict]:
+    """Every recent post from the newsletters a member follows, newest first (one reading list)."""
+    from concurrent.futures import ThreadPoolExecutor
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    urls = [(n, feed_url(n)) for n in newsletters[:150]]
+    urls = [(n, u) for n, u in urls if u]
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        feeds = list(pool.map(lambda nu: (nu[0], *_feed(nu[1])), urls))
+    posts = []
+    for n, title, entries in feeds:
+        for e in entries:
+            if e["published"] and e["published"] < since:
+                continue
+            posts.append({"title": e["title"], "summary": e["summary"][:300], "body": e["body"], "link": e["link"],
+                          "source": title or n, "newsletter": n, "published": e["published"]})
+    return sorted(posts, key=lambda p: p["published"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+
+def feed_status(newsletters: list[str]) -> dict[str, bool]:
+    """Which newsletters returned posts on the last read."""
+    out = {}
+    for n in newsletters:
+        u = feed_url(n)
+        hit = _feed_cache.get(u) if u else None
+        out[n] = bool(hit and hit[2])
+    return out
+
+
+def subscriptions_of(handle: str) -> tuple[list[str], str | None]:
+    """Newsletters a Substack reader follows, from their public profile (substack.com/@handle). Works only when
+    the reader shows their subscriptions publicly, which is Substack's default."""
+    h = (handle or "").strip().lstrip("@")
+    h = re.sub(r"^https?://(www\.)?substack\.com/@?", "", h).split("/")[0].split("?")[0]
+    if not re.fullmatch(r"[A-Za-z0-9_\-.]{2,60}", h):
+        return [], "That doesn't look like a Substack handle. It's the part after substack.com/@"
+    try:
+        r = requests.get(f"https://substack.com/api/v1/user/{h}/public_profile", headers=HEADERS, timeout=20)
+    except requests.RequestException as exc:
+        return [], f"Substack couldn't be reached ({exc.__class__.__name__})."
+    if r.status_code == 404:
+        return [], f"No Substack profile called @{h}."
+    if not r.ok or "json" not in (r.headers.get("content-type") or ""):
+        return [], f"Substack didn't share the profile (status {r.status_code}). Paste your newsletters instead."
+    data = r.json()
+    subs = data.get("subscriptions") or data.get("publicationUsers") or []
+    out = []
+    for s in subs:
+        pub = s.get("publication") if isinstance(s, dict) else None
+        if not isinstance(pub, dict):
+            continue
+        dom = (pub.get("custom_domain") or "").strip()
+        sub = (pub.get("subdomain") or "").strip()
+        if dom and not pub.get("custom_domain_optional"):
+            out.append(dom)
+        elif sub:
+            out.append(sub)
+    if not out:
+        return [], ("The profile was found but its subscriptions aren't public. On Substack: Settings, then turn on "
+                    "showing your subscriptions, or paste your newsletters below.")
+    return list(dict.fromkeys(out)), None

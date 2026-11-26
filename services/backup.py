@@ -42,6 +42,6 @@ def export(user_id: int) -> bytes:
                 w.writeheader()
                 w.writerows(rows)
                 zf.writestr(f"{name}.csv", out.getvalue())
-        zf.writestr("README.txt", "Your Verdant Filings data. verdant-backup.json has everything; the CSV files open in "
+        zf.writestr("README.txt", "Your Verdant Terminal data. verdant-backup.json has everything; the CSV files open in "
                                   "Excel or Google Sheets.\n")
     return buf.getvalue()

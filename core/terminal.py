@@ -14,11 +14,12 @@ from . import nav
 from .db import as_utc, companies, get_engine, run_log, utcnow
 
 # (page id, tab label, F-key). Pages without a key still get a tab.
-TABS = [("today", "Today", "F1"), ("watchlist", "Watchlist", "F2"), ("company", "Company", "F3"),
-        ("filings", "Filings", "F4"), ("insiders", "Insiders", "F5"), ("portfolio", "Portfolio", "F6"),
-        ("ideas", "Ideas", "F7"), ("ipos", "IPOs", "F8"), ("calendar", "Calendar", "F9"),
-        ("screener", "Screener", "F10"), ("compare", "Compare", ""), ("journal", "Journal", ""),
-        ("search", "Search", ""), ("account", "Account", ""), ("admin", "Admin", "")]
+TABS = [("today", "Today", "F1"), ("portfolio", "Portfolio", "F2"), ("filings", "Filings", "F3"),
+        ("journal", "Journal", "F4"), ("company", "Company", "F5"), ("watchlist", "Watchlist", "F6"),
+        ("ideas", "Ideas", "F7"), ("banks", "Bank reports", "F8"), ("substack", "Substack", "F9"),
+        ("news", "News", "F10"), ("insiders", "Insiders", ""), ("ipos", "IPOs", ""), ("calendar", "Calendar", ""),
+        ("screener", "Screener", ""), ("compare", "Compare", ""), ("search", "Search", ""),
+        ("account", "Account", ""), ("admin", "Admin", "")]
 
 ALIASES = {
     "today": "today", "t": "today", "home": "today", "monitor": "today",
@@ -32,11 +33,18 @@ ALIASES = {
     "screener": "screener", "screen": "screener", "scr": "screener", "compare": "compare", "cmp": "compare",
     "journal": "journal", "j": "journal", "notes": "journal", "search": "search", "s": "search", "find": "search",
     "account": "account", "acct": "account", "settings": "account", "admin": "admin",
+    "banks": "banks", "bank": "banks", "research": "banks", "sellside": "banks", "brokers": "banks",
+    "news": "news", "n": "news", "headlines": "news", "defence": "news", "defense": "news",
+    "substack": "substack", "subs": "substack", "newsletters": "substack", "blogs": "substack",
 }
 
 # Clocks: label, IANA zone, local open and close (HH:MM), for the dot showing whether that market is trading.
-CLOCKS = [("NY", "America/New_York", "09:30", "16:00"), ("SEOUL", "Asia/Seoul", "09:00", "15:30"),
-          ("HELSINKI", "Europe/Helsinki", "10:00", "18:30"), ("LONDON", "Europe/London", "08:00", "16:30")]
+# Clocks: label, IANA zone, then trading hours (HH:MM) by weekday Mon..Sun ("" = closed), for the open/closed dot.
+CLOCKS = [("NY", "America/New_York", [("09:30", "16:00")] * 5 + [None, None]),
+          ("SEOUL", "Asia/Seoul", [("09:00", "15:30")] * 5 + [None, None]),
+          ("SYDNEY", "Australia/Sydney", [("10:00", "16:00")] * 5 + [None, None]),
+          ("LONDON", "Europe/London", [("08:00", "16:30")] * 5 + [None, None]),
+          ("TEL AVIV", "Asia/Jerusalem", [("09:59", "17:25")] * 4 + [("09:59", "14:00"), None, None])]
 
 _CSS = """
 :host { display:block; }
@@ -50,7 +58,7 @@ _CSS = """
 .cmd input { flex:1; background:transparent; border:none; outline:none; color:#FFAE1A; font:inherit; font-weight:500;
              text-transform:uppercase; caret-color:#FFAE1A; min-width:0; }
 .cmd input::placeholder { color:#7C878C; text-transform:none; font-weight:400; }
-.clocks { display:flex; gap:14px; white-space:nowrap; color:#7C878C; }
+.clocks { display:flex; gap:12px; white-space:nowrap; color:#7C878C; }
 .clocks b { color:#D9DEE0; font-weight:500; margin-left:4px; }
 .dot { margin-left:4px; font-size:10px; }
 .dot.on { color:#33D17A; } .dot.off { color:#FF5A4E; }
@@ -63,6 +71,7 @@ _CSS = """
 .keys button:hover { color:#D9DEE0; background:#0B0F11; }
 .keys button:focus-visible { outline:1px solid #FFAE1A; outline-offset:-1px; }
 .keys button.on { background:#FFAE1A; color:#000; } .keys button.on b { color:#000; }
+@media (max-width:1100px) { .clocks span:nth-child(n+4) { display:none; } }
 @media (max-width:900px) { .clocks { display:none; } }
 @media (max-width:640px) { .brand { display:none; } .keys button { padding:6px 10px; } }
 """
@@ -103,8 +112,10 @@ export default function(component) {
     for (const c of data.clocks) {
       const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: c.tz, hour: '2-digit',
         minute: '2-digit', weekday: 'short', hour12: false }).formatToParts(now).map(x => [x.type, x.value]));
-      const hm = parts.hour + ':' + parts.minute;
-      const open = !['Sat', 'Sun'].includes(parts.weekday) && hm >= c.open && hm < c.close;
+      const hm = (parts.hour === '24' ? '00' : parts.hour) + ':' + parts.minute;
+      const day = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(parts.weekday);
+      const h = c.hours[day];
+      const open = !!h && hm >= h[0] && hm < h[1];
       const s = document.createElement('span');
       s.textContent = c.label;
       const t = document.createElement('b'); t.textContent = hm; s.appendChild(t);
@@ -155,11 +166,11 @@ def bar(pages: dict, current) -> None:
     """Draw the top bar and act on what was typed or pressed."""
     active = next((pid for pid, p in pages.items() if p is current or getattr(p, "url_path", None) == getattr(current, "url_path", "")), "")
     tabs = [{"id": pid, "label": label, "fkey": fkey} for pid, label, fkey in TABS if pid in pages]
-    clocks = [{"label": l, "tz": tz, "open": o, "close": c} for l, tz, o, c in CLOCKS]
+    clocks = [{"label": l, "tz": tz, "hours": [list(h) if h else None for h in hours]} for l, tz, hours in CLOCKS]
     from .config import app_name
     with st.container(key="vt-bar"):
         res = _component()(data={"pages": tabs, "active": active, "clocks": clocks,
-                                 "brand": app_name().split()[0].upper()},
+                                 "brand": app_name().upper()},
                            key="vt", on_go_change=lambda: None, on_cmd_change=lambda: None)
     go = getattr(res, "go", None)
     cmd = getattr(res, "cmd", None)

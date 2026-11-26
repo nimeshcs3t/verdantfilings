@@ -1,17 +1,63 @@
+# Terminal look: black panels, amber accents, monospace type. One theme for every visitor.
 [theme]
-font = "sans serif"
+base = "dark"
+primaryColor = "#FFAE1A"
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#0B0F11"
+textColor = "#D9DEE0"
+linkColor = "#FFAE1A"
+borderColor = "#22282B"
+dataframeBorderColor = "#1A1F22"
+dataframeHeaderBackgroundColor = "#07090A"
+dataframeHeaderTextColor = "#59C3E8"
+showWidgetBorder = true
+baseRadius = "none"
+buttonRadius = "none"
+baseFontSize = 14
+font = "Plex Mono, ui-monospace, Menlo, Consolas, 'Noto Sans KR', monospace"
+headingFont = "Plex Mono, ui-monospace, Menlo, Consolas, monospace"
+codeFont = "Plex Mono, ui-monospace, Menlo, Consolas, monospace"
+redColor = "#FF5A4E"
+greenColor = "#33D17A"
+blueColor = "#59C3E8"
+orangeColor = "#FFAE1A"
+yellowColor = "#FFD24D"
+violetColor = "#C792EA"
+grayColor = "#7C878C"
+chartCategoricalColors = ["#FFAE1A", "#59C3E8", "#33D17A", "#C792EA", "#FF5A4E", "#FFD24D", "#4DD0E1", "#FF8A65", "#9CCC65", "#7C878C"]
 
-[theme.light]
-primaryColor = "#1E6A4E"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F4F6F5"
-textColor = "#17212B"
+[[theme.fontFaces]]
+family = "Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-latin-400-normal.woff2"
+weight = 400
 
-[theme.dark]
-primaryColor = "#62C59A"
-backgroundColor = "#101615"
-secondaryBackgroundColor = "#18201E"
-textColor = "#E6ECE9"
+[[theme.fontFaces]]
+family = "Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-latin-ext-400-normal.woff2"
+weight = 400
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1E9F, U+20A0-20C0, U+2C60-2C7F, U+A720-A7FF"
+
+[[theme.fontFaces]]
+family = "Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-latin-500-normal.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-latin-ext-500-normal.woff2"
+weight = 500
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1E9F, U+20A0-20C0, U+2C60-2C7F, U+A720-A7FF"
+
+[[theme.fontFaces]]
+family = "Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-latin-ext-600-normal.woff2"
+weight = 600
+unicodeRange = "U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1E9F, U+20A0-20C0, U+2C60-2C7F, U+A720-A7FF"
 
 [client]
 toolbarMode = "viewer"

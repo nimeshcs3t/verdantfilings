@@ -295,3 +295,41 @@ def subscriptions_of(handle: str) -> tuple[list[str], str | None]:
         return [], ("The profile was found but its subscriptions aren't public. On Substack: Settings, then turn on "
                     "showing your subscriptions, or paste your newsletters below.")
     return list(dict.fromkeys(out)), None
+
+
+def resolve(entry: str) -> tuple[str | None, str, str | None]:
+    """What a member typed -> (newsletter to store, its title, error). Accepts 'thegeneralist',
+    'thegeneralist.substack.com', any post link, a custom domain, or a writer's profile ('@handle',
+    'substack.com/@handle'), which is turned into the writer's own newsletter."""
+    s = (entry or "").strip()
+    if not s:
+        return None, "", "Type a newsletter name or paste a link."
+    prof = re.match(r"^(?:https?://)?(?:www\.)?substack\.com/@([A-Za-z0-9_\-.]{2,60})", s) or re.match(r"^@([A-Za-z0-9_\-.]{2,60})$", s)
+    if prof:
+        try:
+            r = requests.get(f"https://substack.com/api/v1/user/{prof.group(1)}/public_profile", headers=HEADERS, timeout=20)
+            data = r.json() if r.ok and "json" in (r.headers.get("content-type") or "") else {}
+        except (requests.RequestException, ValueError):
+            data = {}
+        pub = data.get("primaryPublication") or (data.get("publicationUsers") or [{}])[0].get("publication") or {}
+        s = (pub.get("custom_domain") if pub.get("custom_domain") and not pub.get("custom_domain_optional") else
+             pub.get("subdomain")) or ""
+        if not s:
+            return None, "", f"Couldn't find a newsletter for @{prof.group(1)}. Paste a link to one of their posts instead."
+    m = re.match(r"^(?:https?://)?([^/\s]+)", s)
+    host = m.group(1).lower() if m else s.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if host.endswith(".substack.com"):
+        value = host.removesuffix(".substack.com")
+    elif "." in host:
+        value = host
+    else:
+        value = host
+    url = feed_url(value)
+    if not url:
+        return None, "", "That doesn't look like a newsletter name or link."
+    title, entries = _feed(url)
+    if not entries and not title:
+        return None, "", f"No posts could be read from {value}. Check the spelling, or paste a link to one of its posts."
+    return value, title or value, None

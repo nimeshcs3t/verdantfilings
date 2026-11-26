@@ -6,10 +6,11 @@ import logging
 import re
 from datetime import date, timedelta
 
-from sqlalchemy import and_, delete, insert, select
+from sqlalchemy import and_, delete, insert, or_, select
 from sqlalchemy.exc import IntegrityError
 
-from core.db import as_utc, companies, company_meta, filings, get_engine, insider_tx, utcnow, watchlist
+from core.db import (as_utc, companies, company_meta, filings, get_engine, insider_tx, stock_ideas, transactions, utcnow,
+                     watchlist)
 from sources import get_source
 
 from .financials import touch_meta
@@ -38,22 +39,34 @@ def _store(uid: str, market: str, ticker: str, rows: list[dict]) -> None:
                                                    shares=r.get("shares"), price=r.get("price"), after=r.get("after")))
 
 
-def _us(limit: int) -> int:
+def tracked(conn) -> set[tuple[str, str]]:
+    """Every company someone follows: watchlists, portfolios and stock ideas."""
+    out = set()
+    for table in (watchlist, transactions, stock_ideas):
+        out |= {tuple(r) for r in conn.execute(select(table.c.market, table.c.ticker).distinct())}
+    return out
+
+
+def _us(limit: int, uids: list[str] | None = None) -> int:
     from sources.us_edgar import parse_ownership
     src = get_source("US")
     if not src or not src.is_configured():
         return 0
-    since = src.today() - timedelta(days=180)
+    since = src.today() - timedelta(days=365)
     with get_engine().connect() as conn:
-        watched = {tuple(r) for r in conn.execute(select(watchlist.c.market, watchlist.c.ticker).distinct())}
-        tickers = [t for m, t in watched if m == "US"]
-        if not tickers:
-            return 0
         done_uids = select(insider_tx.c.uid)
-        todo = conn.execute(select(filings.c.uid, filings.c.ticker).where(
-            filings.c.market == "US", filings.c.ticker.in_(tickers), filings.c.filed_date >= since,
-            filings.c.title_en.like("%insider%"), filings.c.uid.not_in(done_uids))
-            .order_by(filings.c.filed_date.desc()).limit(limit)).all()
+        if uids:
+            todo = conn.execute(select(filings.c.uid, filings.c.ticker).where(
+                filings.c.market == "US", filings.c.uid.in_(uids), filings.c.uid.not_in(done_uids))).all()
+        else:
+            tickers = [t for m, t in tracked(conn) if m == "US"]
+            if not tickers:
+                return 0
+            todo = conn.execute(select(filings.c.uid, filings.c.ticker).where(
+                filings.c.market == "US", filings.c.ticker.in_(tickers), filings.c.filed_date >= since,
+                or_(filings.c.title_en.like("%nsider%"), filings.c.title_en.like("%Form 4%"),
+                    filings.c.title_local.like("4%")), filings.c.uid.not_in(done_uids))
+                .order_by(filings.c.filed_date.desc()).limit(limit)).all()
     n = 0
     for uid, ticker in todo:
         try:
@@ -66,18 +79,20 @@ def _us(limit: int) -> int:
     return n
 
 
-def _kr(limit: int) -> int:
+def _kr(limit: int, only: set[str] | None = None) -> int:
     src = get_source("KR")
     if not src or not src.is_configured():
         return 0
     with get_engine().connect() as conn:
+        mine = {t for m, t in tracked(conn) if m == "KR"}
         rows = conn.execute(select(companies.c.ticker, companies.c.source_id, company_meta.c.insider_updated)
-                            .select_from(companies.join(watchlist, and_(watchlist.c.market == companies.c.market,
-                                                                        watchlist.c.ticker == companies.c.ticker))
-                                         .outerjoin(company_meta, and_(company_meta.c.market == companies.c.market,
-                                                                       company_meta.c.ticker == companies.c.ticker)))
-                            .where(companies.c.market == "KR").distinct()).all()
-    due = [r for r in rows if not r[2] or utcnow() - as_utc(r[2]) > timedelta(days=1)][:limit]
+                            .select_from(companies.outerjoin(company_meta, and_(
+                                company_meta.c.market == companies.c.market, company_meta.c.ticker == companies.c.ticker)))
+                            .where(companies.c.market == "KR", companies.c.ticker.in_(mine or {""}))).all()
+    if only is not None:
+        due = [r for r in rows if r[0] in only][:limit]
+    else:
+        due = [r for r in rows if not r[2] or utcnow() - as_utc(r[2]) > timedelta(days=1)][:limit]
     n = 0
     for ticker, corp_code, _ in due:
         try:
@@ -113,8 +128,16 @@ def _num(text) -> float | None:
         return None
 
 
-def refresh(limit: int = 25) -> int:
-    return _us(limit) + _kr(max(3, limit // 5))
+def refresh(limit: int = 60) -> int:
+    return _us(limit) + _kr(max(5, limit // 5))
+
+
+def read_now(us_uids: list[str], kr_tickers: set[str]) -> int:
+    """Read the named insider filings straight away (from the Insiders page) instead of waiting for the worker."""
+    n = _us(len(us_uids), us_uids) if us_uids else 0
+    if kr_tickers:
+        n += _kr(len(kr_tickers), kr_tickers)
+    return n
 
 
 def recent(market: str, ticker: str, days: int = 180) -> list[dict]:

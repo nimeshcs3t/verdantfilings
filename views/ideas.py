@@ -10,7 +10,7 @@ import streamlit as st
 from core.ui import esc, html_block, page_header
 from services import groups, ideas as svc, journal
 
-UP, DOWN = "#1B7A47", "#B4321F"
+UP, DOWN = "#33D17A", "#FF5A4E"
 
 
 @st.cache_data(ttl=1800, show_spinner=False)

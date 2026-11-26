@@ -168,7 +168,7 @@ def page() -> None:
     fv_row = fairvalue.get_all(user["id"]).get((market, comp["ticker"]))
     if fv_row:
         levels.append((fv_row["value"], "Fair value", "fair"))
-    view = st.segmented_control("Chart", ["Simple", "Technical"], default="Simple", key=f"chart-kind-{market}-{comp['ticker']}",
+    view = st.segmented_control("Chart", ["Simple", "Technical"], default="Technical", key=f"chart-kind-{market}-{comp['ticker']}",
                                 label_visibility="collapsed",
                                 help="Technical: price with EMA 21 and EMA 50, volume, and RSI 14.")
     if view == "Technical":

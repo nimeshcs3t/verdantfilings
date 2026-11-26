@@ -42,12 +42,12 @@ def _squarify(values: list[float], x: float, y: float, w: float, h: float) -> li
 
 def colour(move: float | None) -> str:
     if move is None:
-        return "#8A938F"
-    m = max(-0.05, min(0.05, move)) / 0.05
+        return "#1A1F22"
+    m = max(-0.05, min(0.05, move)) / 0.05          # terminal colours: dark grey to green or red
     if m >= 0:
-        return f"rgb({int(232 - 190 * m)},{int(240 - 70 * m)},{int(234 - 160 * m)})"
+        return f"rgb({int(22 + 0 * m)},{int(28 + 130 * m)},{int(32 + 50 * m)})"
     m = -m
-    return f"rgb({int(244 - 60 * m)},{int(232 - 170 * m)},{int(230 - 170 * m)})"
+    return f"rgb({int(22 + 180 * m)},{int(28 + 20 * m)},{int(32 + 10 * m)})"
 
 
 def svg(items: list[dict]) -> str:
@@ -62,7 +62,7 @@ def svg(items: list[dict]) -> str:
         move = i.get("move")
         label = f"{move * 100:+.1f}%" if move is not None else ""
         dark = move is not None and abs(move) > 0.03
-        fill = "#fff" if dark else "#1B2430"
+        fill = "#fff" if dark else "#D9DEE0"
         text = ""
         if rw > 46 and rh > 28:
             size = max(10, min(16, rw / 7, rh / 3))

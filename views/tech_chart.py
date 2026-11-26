@@ -19,11 +19,8 @@ def _bars(market: str, ticker: str) -> list[dict]:
 
 
 def _colors() -> dict:
-    dark = is_dark()
-    return {"price": "#E6ECE9" if dark else "#17212B", "e21": "#D9A441" if dark else "#A9621B",
-            "e50": "#62C59A" if dark else "#1E6A4E", "up": "#3FA66B" if dark else "#1B7A47",
-            "down": "#E0664F" if dark else "#B4321F", "grid": "#27302D" if dark else "#E2E7E4",
-            "muted": "#96A39D" if dark else "#5E6A73", "band": "#1C2522" if dark else "#F4F6F5", "filing": "#8E7CC3"}
+    return {"price": "#D9DEE0", "e21": "#FFAE1A", "e50": "#59C3E8", "up": "#33D17A", "down": "#FF5A4E",
+            "grid": "#1A1F22", "muted": "#7C878C", "band": "#0E1A1F", "filing": "#FFAE1A", "rsi": "#C792EA"}
 
 
 def technical_chart(market: str, ticker: str, filing_dates: list[date], key: str) -> None:
@@ -48,25 +45,30 @@ def technical_chart(market: str, ticker: str, filing_dates: list[date], key: str
            alt.Tooltip("ema21:Q", title="EMA 21", format=",.2f"), alt.Tooltip("ema50:Q", title="EMA 50", format=",.2f"),
            alt.Tooltip("volume:Q", title="Volume", format=",.0f"), alt.Tooltip("rsi:Q", title="RSI 14", format=".0f")]
 
-    long = df.melt(id_vars=["date"], value_vars=["close", "ema21", "ema50"], var_name="series", value_name="value").dropna()
-    names = {"close": "Close", "ema21": "EMA 21", "ema50": "EMA 50"}
+    long = df.melt(id_vars=["date"], value_vars=["ema21", "ema50"], var_name="series", value_name="value").dropna()
+    names = {"ema21": "EMA 21", "ema50": "EMA 50"}
     long["series"] = long["series"].map(names)
     lo, hi = float(df[["low", "ema21", "ema50"]].min(numeric_only=True).min()), float(df["high"].max())
     pad = (hi - lo) * 0.06
     price = alt.Chart(long).mark_line(strokeWidth=1.6).encode(
         x=x_quiet, y=alt.Y("value:Q", title=None, scale=alt.Scale(domain=[lo - pad, hi + pad], zero=False), axis=alt.Axis(**axis)),
-        color=alt.Color("series:N", scale=alt.Scale(domain=list(names.values()), range=[c["price"], c["e21"], c["e50"]]),
+        color=alt.Color("series:N", scale=alt.Scale(domain=list(names.values()), range=[c["e21"], c["e50"]]),
                         legend=alt.Legend(orient="top", direction="horizontal", title=None, labelColor=c["muted"],
-                                          symbolType="stroke", offset=4)),
-        strokeWidth=alt.condition(alt.datum.series == "Close", alt.value(1.8), alt.value(1.3)))
+                                          symbolType="stroke", offset=4)))
+    yscale = alt.Scale(domain=[lo - pad, hi + pad], zero=False)
+    candle_color = alt.Color("dir:N", scale=alt.Scale(domain=["up", "down"], range=[c["up"], c["down"]]), legend=None)
+    wick = alt.Chart(df).mark_rule(strokeWidth=1).encode(
+        x=x_quiet, y=alt.Y("low:Q", scale=yscale, title=None), y2="high:Q", color=candle_color)
+    body = alt.Chart(df).mark_bar(size=max(1.5, min(7, 520 / max(len(df), 1)))).encode(
+        x=x_quiet, y=alt.Y("open:Q", scale=yscale, title=None), y2="close:Q", color=candle_color, tooltip=tip)
     hover = alt.Chart(df).mark_rule(opacity=0).encode(x=x_quiet, tooltip=tip)
-    layers = [price, hover]
+    layers = [wick, body, price, hover]
     marks = [d for d in filing_dates if d >= since]
     if marks:
         fdf = pd.DataFrame({"date": pd.to_datetime(sorted(set(marks)))})
         layers.append(alt.Chart(fdf).mark_rule(color=c["filing"], strokeDash=[2, 3], opacity=0.6).encode(
             x=x_quiet, tooltip=[alt.Tooltip("date:T", title="Filing", format="%d %b %Y")]))
-    top = alt.layer(*layers).properties(height=280).add_params(zoom)
+    top = alt.layer(*layers).resolve_scale(color="independent").properties(height=300).add_params(zoom)
 
     vol = alt.Chart(df).mark_bar(opacity=0.75).encode(
         x=x_quiet, y=alt.Y("volume:Q", title="Volume", axis=alt.Axis(format="~s", tickCount=3, **axis)),
@@ -76,15 +78,15 @@ def technical_chart(market: str, ticker: str, filing_dates: list[date], key: str
     band = alt.Chart(pd.DataFrame({"y": [30], "y2": [70]})).mark_rect(color=c["band"], opacity=0.9).encode(
         y=alt.Y("y:Q", scale=alt.Scale(domain=[0, 100])), y2="y2:Q")
     lines = alt.Chart(pd.DataFrame({"y": [30, 70]})).mark_rule(color=c["muted"], strokeDash=[3, 3], opacity=0.7).encode(y="y:Q")
-    rsi_line = alt.Chart(df.dropna(subset=["rsi"])).mark_line(color=c["e50"], strokeWidth=1.4).encode(
+    rsi_line = alt.Chart(df.dropna(subset=["rsi"])).mark_line(color=c["rsi"], strokeWidth=1.3).encode(
         x=x, y=alt.Y("rsi:Q", title="RSI 14", scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(values=[30, 50, 70], **axis)),
         tooltip=tip)
     bottom = alt.layer(band, lines, rsi_line).properties(height=110).add_params(zoom)
 
     chart = (alt.vconcat(top, vol, bottom, spacing=6).resolve_scale(x="shared", color="independent")
-             .configure_view(stroke=None).configure(background="transparent", font="IBM Plex Sans"))
+             .configure_view(stroke=None).configure(background="transparent", font="Plex Mono"))
     st.altair_chart(chart, width="stretch")
-    st.caption("Dotted purple lines mark filing dates.") if marks else None
+    st.caption("Dotted amber lines mark filing dates.") if marks else None
 
     r = technicals.reading(rows)
     if r:

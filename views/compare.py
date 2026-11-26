@@ -9,7 +9,7 @@ from sources import get_source
 
 from .components import price_history
 
-COLOURS = ["#1F6B4F", "#2E5E8C", "#C07A2C"]
+COLOURS = ["#FFAE1A", "#59C3E8", "#C792EA"]
 
 
 def _options(uid: int) -> dict[str, tuple[str, str]]:

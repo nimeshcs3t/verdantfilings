@@ -6,7 +6,7 @@ from datetime import date
 
 from core.ui import esc
 
-SLICE_COLOURS = ["#1F6B4F", "#2E5E8C", "#C07A2C", "#6A4C93", "#9C3D54", "#2F7A7A", "#8A8F3B", "#7A4B2F"]
+SLICE_COLOURS = ["#FFAE1A", "#59C3E8", "#33D17A", "#C792EA", "#FF5A4E", "#FFD24D", "#4DD0E1", "#FF8A65"]
 
 
 def performance_svg(portfolio: list[tuple[date, float]], benchmark: list[tuple[date, float]], bench_name: str) -> str:

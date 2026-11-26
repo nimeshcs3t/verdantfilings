@@ -71,8 +71,11 @@ def page() -> None:
                f'<div class="by">{esc(q_who)}{(", " + esc(q_where)) if q_where else ""}</div></div>')
     dashboard(user, all_wl)
 
-    main, side = st.columns([2.2, 1], gap="large")
-    with main:
+    left, main, side = st.columns([1.2, 1.8, 0.9], gap="small")
+    with left.container(key="today-left"):
+        monitor(user, all_wl, rows, period)
+    with main.container(key="today-mid"):
+        html_block(f'<div class="pane-h">Filings<span>{len(rows)} · {esc(period.lower())} · newest first</span></div>')
         cols = st.container(key="today-filters").columns(4)
         cols[0].selectbox("Period", list(PERIODS), key="today-period",
                           help="Days start at midnight US Eastern time.")
@@ -134,7 +137,7 @@ def page() -> None:
         for credit in sorted({get_source(r["market"]).attribution for r in rows} - {""}):
             st.caption(credit)
 
-    with side:
+    with side.container(key="today-right"):
         coming = events_svc.upcoming([(w["market"], w["ticker"]) for w in all_wl], days=30)
         if coming:
             html_block('<div class="section" style="margin-top:.2rem">Coming up</div>' + "".join(
@@ -151,6 +154,59 @@ def page() -> None:
                 items += cached_english_news(w["name_en"], w["ticker"], 3)[:2]
         items.sort(key=lambda n: n["published"].timestamp() if n.get("published") else 0, reverse=True)
         render_news(items[:10])
+
+
+def monitor(user: dict, wl: list[dict], rows: list[dict], period: str) -> None:
+    """Left pane: watchlist prices with new-filing counts, then recent insider trades. Tickers open the company."""
+    from core.terminal import open_link, panel
+    from services import prices
+    hist = histories([(w["market"], w["ticker"]) for w in wl])
+    new = {}
+    for r in rows:
+        new[(r["market"], r["ticker"])] = new.get((r["market"], r["ticker"]), 0) + 1
+    body = ""
+    for w in wl:
+        pair = (w["market"], w["ticker"])
+        h = hist.get(pair) or []
+        last = (f"{h[-1][1]:,.0f}" if h[-1][1] >= 10000 else f"{h[-1][1]:,.2f}") if h else "–"
+        mv = prices.last_move(h) if h else None
+        move = "" if mv is None else f'<span class="{"up" if mv > 0 else "down" if mv < 0 else "dim"}">{mv * 100:+.2f}%</span>'
+        n = new.get(pair, 0)
+        body += (f'<tr title="{esc(w["name_en"])}"><td class="l tk">{open_link(w["market"], w["ticker"], w["ticker"])}'
+                 f' <span class="dim" style="color:var(--muted)">{esc(w["market"])}</span></td>'
+                 f'<td class="l"><span class="nm">{esc(w["name_en"])}</span></td>'
+                 f'<td>{last}</td><td>{move}</td><td class="opt">{prices.sparkline_svg(h, width=46, height=14) if h else ""}</td>'
+                 f'<td>{f"<span style=color:var(--pine)>{n}</span>" if n else "<span class=dim>·</span>"}</td></tr>')
+    markup = (f'<div class="pane-h">Watchlist<span>{len(wl)} names · new = filings, {esc(period.lower())}</span></div>'
+              '<div class="mon-wrap"><table class="mon"><tr><th class="l">Ticker</th><th class="l">Name</th><th>Last</th>'
+              f'<th>1D</th><th class="opt">30D</th><th>New</th></tr>{body}</table></div>')
+    from .insiders_page import _trades
+    since = date.today() - timedelta(days=30)
+    try:
+        tr = _trades({(w["market"], w["ticker"]): w["name_en"] for w in wl}, since)
+    except Exception:
+        tr = None
+    if tr is not None and not tr.empty:
+        buys = int((tr["Type"].isin(["Buy", "Increase"])).sum())
+        sells = int((tr["Type"].isin(["Sell", "Decrease"])).sum())
+        trs = ""
+        for _, t in tr.head(14).iterrows():
+            kind = t["Type"]
+            cls = "buy" if kind in ("Buy", "Increase") else "sell" if kind in ("Sell", "Decrease") else "dim"
+            val = t["Value"]
+            vtxt = "" if val is None or val != val else f"{val / 1e6:+,.2f}m" if abs(val) >= 1e6 else f"{val / 1e3:+,.0f}k"
+            who = (t["Person"] or "")[:18]
+            trs += (f'<tr><td class="l dim">{t["Date"]:%d %b}</td><td class="l tk">{open_link(t["Market"], t["Ticker"], t["Ticker"])}</td>'
+                    f'<td class="l"><span class="nm" style="max-width:96px">{esc(who)}</span></td>'
+                    f'<td class="l {cls}">{esc(kind[:10])}</td><td>{(t["Shares"] or 0):,.0f}</td><td class="{cls}">{vtxt}</td></tr>')
+        markup += (f'<div class="pane-h" style="margin-top:14px">Insider trades<span>30 days · {buys} buys / {sells} sells</span></div>'
+                   '<div class="mon-wrap"><table class="mon"><tr><th class="l">Date</th><th class="l">Ticker</th><th class="l">Person</th>'
+                   f'<th class="l">Type</th><th>Shares</th><th title="In the share\'s own currency">Value</th></tr>{trs}</table></div>')
+    else:
+        markup += ('<div class="pane-h" style="margin-top:14px">Insider trades<span>30 days</span></div>'
+                   '<div class="dim" style="font-size:.78rem;color:var(--muted)">No parsed insider trades in the last 30 days. '
+                   'The Insider trades page (F5) lists insider filings from every market.</div>')
+    panel(markup, key="today-monitor")
 
 
 def dashboard(user: dict, wl: list[dict]) -> None:

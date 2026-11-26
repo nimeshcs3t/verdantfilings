@@ -86,7 +86,9 @@ if user["role"] == "admin":
     pages["admin"] = st.Page(admin.page, title="Admin", url_path="admin")
 nav.PAGES.clear()
 nav.PAGES.update(pages)
-current = st.navigation(list(pages.values()), position="top")
+current = st.navigation(list(pages.values()), position="hidden")   # the terminal bar below is the menu
+from core import terminal  # noqa: E402
+terminal.bar(pages, current)
 
 # Bottom menu for phones (hidden on wider screens by CSS); page links switch pages without reloading.
 with st.container(key="bottomnav", horizontal=True, gap=None):
@@ -95,4 +97,5 @@ with st.container(key="bottomnav", horizontal=True, gap=None):
                               ("calendar", ":material/calendar_month:", "Calendar"), ("search", ":material/search:", "Search")):
         st.page_link(pages[name], label=label, icon=icon)
 
+terminal.status_bar(user)
 current.run()

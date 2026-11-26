@@ -122,6 +122,8 @@ def page() -> None:
         b3.link_button("Find website", "https://www.google.com/search?q=" + quote_plus(f'{comp["name_en"]} official website'),
                        width="stretch", icon=":material/travel_explore:")
 
+    _investor_page_watch(market, comp, site, open_=(market == "IL"))
+
     if market == "OT":                       # foreign shares traded OTC: their filings are in the home market
         from services.home_listing import find as home_listing
         try:
@@ -469,3 +471,46 @@ def peers_tab(user: dict, market: str, comp: dict) -> None:
         st.caption(f"{comp['name_en']}'s filings that name other companies you follow")
         html_block("".join(f'<div class="ev-row"><b>{r["filed_date"]:%d %b}</b>{esc(r["title_en"])} '
                            f'<span>names {esc(r["m_name"] or r["m_ticker"])}</span></div>' for r in names_others[:15]))
+
+
+def _investor_page_watch(market: str, comp: dict, site: str | None, open_: bool = False) -> None:
+    """Check the company's own investor page for new reports, for exchanges the app can't read (Tel Aviv)."""
+    from services import irwatch
+    ticker = comp["ticker"]
+    entry = irwatch.get(market, ticker)
+    label = "Investor page watch" + (" (on)" if entry else "")
+    with st.expander(label, expanded=open_ and not entry, icon=":material/radar:"):
+        st.caption("The app checks this company's investor relations page every hour. Each new report, results or "
+                   "press release link becomes a filing here, translated if it's in Hebrew, with the usual alerts. "
+                   "Useful where the exchange can't be read automatically, like Tel Aviv.")
+        if entry:
+            when = entry.get("checked", "")[:16].replace("T", " ")
+            st.markdown(f"Watching [{esc(entry['url'])}]({entry['url']}). Last check {when} UTC, "
+                        f"{entry.get('links', 0)} report links on the page."
+                        + (f" Last check failed: {entry['error']}." if entry.get("error") else ""))
+            c1, c2, _ = st.columns([1, 1, 2])
+            if c1.button("Check now", key=f"irw-check-{ticker}", icon=":material/refresh:"):
+                with st.spinner("Checking the page"):
+                    n = irwatch.check(market, ticker)
+                st.toast(f"{n} new report{'s' if n != 1 else ''} found." if n else "Nothing new on the page.")
+                st.rerun()
+            if c2.button("Stop watching", key=f"irw-stop-{ticker}"):
+                irwatch.remove(market, ticker)
+                st.rerun()
+            return
+        c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+        url = c1.text_input("Investor page address", value="", key=f"irw-url-{ticker}",
+                            placeholder=(site.rstrip("/") + "/investors") if site else "https://company.com/investors")
+        if c2.button("Start watching", key=f"irw-add-{ticker}", type="primary", width="stretch") and url.strip():
+            with st.spinner("Reading the page"):
+                n, err = irwatch.add(market, ticker, url)
+            if err:
+                st.warning(err)
+            elif n == 0:
+                st.warning("The page opened, but no report links were found on it. It may build its list with "
+                           "scripts the app can't run: try the page that lists reports or press releases directly, "
+                           "or a link to its PDF archive.")
+                irwatch.remove(market, ticker)
+            else:
+                st.success(f"Watching. {n} report links are there now; only new ones will be added from here on.")
+                st.rerun()

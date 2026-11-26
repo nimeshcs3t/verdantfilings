@@ -392,12 +392,13 @@ def run_once() -> dict:
             except Exception as exc:
                 stats["errors"] += 1
                 log.warning("sync failed for %s:%s: %s", market, ticker, exc)
-        from . import bot, briefs, connections, digests, events, financials, housekeeping, insiders, journal, screener, logos, notes, portfolio, signals
+        from . import bot, briefs, connections, digests, events, financials, housekeeping, insiders, irwatch, journal, screener, logos, notes, portfolio, signals
         from .alerts import run_alerts
         # (stats key, job, minimum minutes between runs; 0 = every run)
         steps = [("retranslated", retranslate_titles, 0), ("summaries", process_overviews, 0), (None, run_alerts, 0),
                  ("commands", bot.process_updates, 0), ("price_alerts", portfolio.check_alerts, 0),
                  ("events", events.refresh, 30), ("insiders", insiders.refresh, 60),
+                 ("investor_pages", irwatch.refresh, 60),
                  ("financials", financials.refresh, 360), ("briefs", briefs.refresh, 360), ("logos", logos.refresh, 360),
                  ("fair_value", _fair_value_alerts, 30), ("journal", journal.send_reminders, 60),
                  ("report_notes", notes.refresh, 60), ("insider_alerts", signals.send_insider_alerts, 60),
